@@ -93,7 +93,7 @@ static bool virtio_blk_reg_read(virtio_blk_state_t *vblk,
         *value = 0;
         return true;
     case 65:
-        *value = 0;
+        *value = 2;
         return true;
     default:
         printf("catched %d\n\r", addr);
@@ -158,14 +158,7 @@ static bool virtio_blk_reg_write(virtio_blk_state_t *vblk,
         return true;
     case 20: /* QueueNotify (W) */
         if (value < ARRAY_SIZE(vblk->queues)) {
-            switch (value) {
-            case VBLK_QUEUE_RX:
-                // virtio_blk_try_rx(vblk);
-                break;
-            case VBLK_QUEUE_TX:
-                // virtio_blk_try_tx(vblk);
-                break;
-            }
+            printf("------QueueNotify: %d\n\r", value);
         } else {
             virtio_blk_set_fail(vblk);
         }

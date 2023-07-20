@@ -145,6 +145,7 @@ typedef struct {
     uint32_t InterruptStatus;
     /* supplied by environment */
     uint32_t *ram;
+    uint32_t *disk;
 } virtio_blk_state_t;
 
 void virtio_blk_read(vm_t *vm,
@@ -167,6 +168,7 @@ bool virtio_blk_init(virtio_blk_state_t *vblk);
 typedef struct {
     bool stopped;
     uint32_t *ram;
+    uint32_t *disk;
     plic_state_t plic;
     u8250_state_t uart;
 #if defined(ENABLE_VIRTIONET)
