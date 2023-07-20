@@ -4,4 +4,5 @@ semu
 
 # Linux-specific
 *.dtb
+*.img
 Image
