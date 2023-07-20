@@ -57,6 +57,18 @@ static void emu_update_vnet_interrupts(vm_t *vm)
 }
 #endif
 
+#if defined(ENABLE_VIRTIOBLK)
+static void emu_update_vblk_interrupts(vm_t *vm)
+{
+    emu_state_t *data = (emu_state_t *) vm->priv;
+    if (data->vblk.InterruptStatus)
+        data->plic.active |= IRQ_VBLK_BIT;
+    else
+        data->plic.active &= ~IRQ_VBLK_BIT;
+    plic_update_interrupts(vm, &data->plic);
+}
+#endif
+
 static void mem_load(vm_t *vm, uint32_t addr, uint8_t width, uint32_t *value)
 {
     emu_state_t *data = (emu_state_t *) vm->priv;
@@ -85,8 +97,14 @@ static void mem_load(vm_t *vm, uint32_t addr, uint8_t width, uint32_t *value)
             emu_update_vnet_interrupts(vm);
             return;
 #endif
+#if defined(ENABLE_VIRTIOBLK)
+        case 0x42: /* VirtIO-Blk */
+            virtio_blk_read(vm, &data->vblk, addr & 0xFFFFF, width, value);
+            emu_update_vblk_interrupts(vm);
+            return;
         }
     }
+#endif
     vm_set_exception(vm, RV_EXC_LOAD_FAULT, vm->exc_val);
 }
 
@@ -118,7 +136,13 @@ static void mem_store(vm_t *vm, uint32_t addr, uint8_t width, uint32_t value)
             emu_update_vnet_interrupts(vm);
             return;
 #endif
+#if defined(ENABLE_VIRTIOBLK)
+        case 0x42: /* VirtIO-Blk  */
+            virtio_blk_write(vm, &data->vblk, addr & 0xFFFFF, width, value);
+            emu_update_vblk_interrupts(vm);
+            return;
         }
+#endif
     }
     vm_set_exception(vm, RV_EXC_STORE_FAULT, vm->exc_val);
 }
@@ -311,6 +335,10 @@ static int semu_start(int argc, char **argv)
     if (!virtio_net_init(&(emu.vnet)))
         fprintf(stderr, "No virtio-net functioned\n");
     emu.vnet.ram = emu.ram;
+#endif
+#if defined(ENABLE_VIRTIOBLK)
+    virtio_blk_init(&(emu.vblk));
+    emu.vblk.ram = emu.ram;
 #endif
 
     /* Emulate */

@@ -117,6 +117,46 @@ void virtio_net_refresh_queue(virtio_net_state_t *vnet);
 bool virtio_net_init(virtio_net_state_t *vnet);
 #endif /* ENABLE_VIRTIONET */
 
+/* VirtIO-Block */
+#if defined(ENABLE_VIRTIOBLK)
+
+#define IRQ_VBLK 3
+#define IRQ_VBLK_BIT (1 << IRQ_VNET)
+
+typedef struct {
+    bool ready;
+} virtio_blk_queue_t;
+
+typedef struct {
+    /* feature negotiation */
+    uint32_t DeviceFeaturesSel;
+    uint32_t DriverFeatures;
+    uint32_t DriverFeaturesSel;
+    /* queue config */
+    uint32_t QueueSel;
+    virtio_blk_queue_t queues[2];
+    /* status */
+    uint32_t Status;
+    uint32_t InterruptStatus;
+    /* supplied by environment */
+    uint32_t *ram;
+} virtio_blk_state_t;
+
+void virtio_blk_read(vm_t *vm,
+                     virtio_blk_state_t *vblk,
+                     uint32_t addr,
+                     uint8_t width,
+                     uint32_t *value);
+
+void virtio_blk_write(vm_t *vm,
+                      virtio_blk_state_t *vblk,
+                      uint32_t addr,
+                      uint8_t width,
+                      uint32_t value);
+
+bool virtio_blk_init(virtio_blk_state_t *vblk);
+#endif /* ENABLE_VIRTIOBLK */
+
 /* memory mapping */
 
 typedef struct {
@@ -126,6 +166,9 @@ typedef struct {
     u8250_state_t uart;
 #if defined(ENABLE_VIRTIONET)
     virtio_net_state_t vnet;
+#endif
+#if defined(ENABLE_VIRTIOBLK)
+    virtio_blk_state_t vblk;
 #endif
     uint32_t timer_lo, timer_hi;
 } emu_state_t;
