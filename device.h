@@ -124,6 +124,11 @@ bool virtio_net_init(virtio_net_state_t *vnet);
 #define IRQ_VBLK_BIT (1 << IRQ_VNET)
 
 typedef struct {
+    uint32_t QueueNum;
+    uint32_t QueueDesc;
+    uint32_t QueueAvail;
+    uint32_t QueueUsed;
+    uint16_t last_avail;
     bool ready;
 } virtio_blk_queue_t;
 

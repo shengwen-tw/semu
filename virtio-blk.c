@@ -18,10 +18,27 @@
 #define VIRTIO_VENDOR_ID 0x12345678
 
 #define VIRTIO_STATUS__DRIVER_OK 4
+#define VIRTIO_STATUS__DEVICE_NEEDS_RESET 64
+
+#define VIRTIO_INT__CONF_CHANGE 2
 
 #define VBLK_FEATURES_0 0
 #define VBLK_FEATURES_1 1 /* VIRTIO_F_VERSION_1 */
 #define VBLK_QUEUE_NUM_MAX 1024
+#define VBLK_QUEUE (vblk->queues[vblk->QueueSel])
+
+#define VBLK_PREPROCESS_ADDR(addr)                        \
+    ((addr) < RAM_SIZE && !((addr) &0b11) ? ((addr) >> 2) \
+                                          : (virtio_blk_set_fail(vblk), 0))
+
+enum { VBLK_QUEUE_RX = 0, VBLK_QUEUE_TX = 1 };
+
+static void virtio_blk_set_fail(virtio_blk_state_t *vblk)
+{
+    vblk->Status |= VIRTIO_STATUS__DEVICE_NEEDS_RESET;
+    if (vblk->Status & VIRTIO_STATUS__DRIVER_OK)
+        vblk->InterruptStatus |= VIRTIO_INT__CONF_CHANGE;
+}
 
 static void virtio_blk_update_status(virtio_blk_state_t *vblk, uint32_t status)
 {
@@ -50,7 +67,7 @@ static bool virtio_blk_reg_read(virtio_blk_state_t *vblk,
         *value = 2;
         return true;
     case 3: /* VendorID (R) */
-        *value = 0x1AF4;
+        *value = VIRTIO_VENDOR_ID;
         return true;
     case 4: /* DeviceFeatures (R) */
         *value = vblk->DeviceFeaturesSel == 0
@@ -61,9 +78,10 @@ static bool virtio_blk_reg_read(virtio_blk_state_t *vblk,
         *value = VBLK_QUEUE_NUM_MAX;
         return true;
     case 17: /* QueueReady (RW) */
-        *value = 0;
+        *value = VBLK_QUEUE.ready ? 1 : 0;
         return true;
     case 24: /* InterruptStatus (R) */
+        *value = vblk->InterruptStatus;
         return true;
     case 28: /* Status (RW) */
         *value = vblk->Status;
@@ -98,34 +116,62 @@ static bool virtio_blk_reg_write(virtio_blk_state_t *vblk,
         vblk->DriverFeaturesSel = value;
         return true;
     case 12: /* QueueSel (W) */
-        vblk->QueueSel = value;
+        if (value < ARRAY_SIZE(vblk->queues))
+            vblk->QueueSel = value;
+        else
+            virtio_blk_set_fail(vblk);
         return true;
     case 14: /* QueueNum (W) */
-
+        if (value > 0 && value <= VBLK_QUEUE_NUM_MAX)
+            VBLK_QUEUE.QueueNum = value;
+        else
+            virtio_blk_set_fail(vblk);
         return true;
     case 17: /* QueueReady (RW) */
+        VBLK_QUEUE.ready = value & 1;
+        if (value & 1)
+            VBLK_QUEUE.last_avail = vblk->ram[VBLK_QUEUE.QueueAvail] >> 16;
+        if (vblk->QueueSel == VBLK_QUEUE_RX)
+            vblk->ram[VBLK_QUEUE.QueueAvail] |=
+                1; /* set VIRTQ_AVAIL_F_NO_INTERRUPT */
         return true;
     case 32: /* QueueDescLow (W) */
-
+        VBLK_QUEUE.QueueDesc = VBLK_PREPROCESS_ADDR(value);
         return true;
     case 33: /* QueueDescHigh (W) */
-
+        if (value)
+            virtio_blk_set_fail(vblk);
         return true;
     case 36: /* QueueAvailLow (W) */
-
+        VBLK_QUEUE.QueueAvail = VBLK_PREPROCESS_ADDR(value);
         return true;
     case 37: /* QueueAvailHigh (W) */
-
+        if (value)
+            virtio_blk_set_fail(vblk);
         return true;
     case 40: /* QueueUsedLow (W) */
-
+        VBLK_QUEUE.QueueUsed = VBLK_PREPROCESS_ADDR(value);
         return true;
     case 41: /* QueueUsedHigh (W) */
-
+        if (value)
+            virtio_blk_set_fail(vblk);
         return true;
     case 20: /* QueueNotify (W) */
+        if (value < ARRAY_SIZE(vblk->queues)) {
+            switch (value) {
+            case VBLK_QUEUE_RX:
+                // virtio_blk_try_rx(vblk);
+                break;
+            case VBLK_QUEUE_TX:
+                // virtio_blk_try_tx(vblk);
+                break;
+            }
+        } else {
+            virtio_blk_set_fail(vblk);
+        }
         return true;
     case 25: /* InterruptACK (W) */
+        vblk->InterruptStatus &= ~value;
         return true;
     case 28: /* Status (RW) */
         virtio_blk_update_status(vblk, value);
