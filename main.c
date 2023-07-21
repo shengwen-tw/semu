@@ -311,14 +311,38 @@ static int semu_start(int argc, char **argv)
     }
     assert(!(((uintptr_t) emu.ram) & 0b11));
 
+    /* Open the disk image */
+    int fd = open("ext4.img", O_RDONLY);
+    if (fd < 0) {
+        fprintf(stderr, "could not open %s\n", "ext4.img");
+        exit(2);
+    }
+
+    /* Get the disk image size */
+    struct stat st;
+    fstat(fd, &st);
+    size_t disk_size = st.st_size;
+
+    /* Set up disk */
+    emu.disk = mmap(NULL, disk_size, PROT_READ | PROT_WRITE,
+                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (emu.disk == MAP_FAILED) {
+        fprintf(stderr, "Could not map disk\n");
+        return 2;
+    }
+    assert(!(((uintptr_t) emu.disk) & 0b11));
+
     char *ram_loc = (char *) emu.ram;
     /* Load Linux kernel image */
     map_file(&ram_loc, argv[1]);
     /* Load at last 1 MiB to prevent kernel / initrd from overwriting it */
     uint32_t dtb_addr = RAM_SIZE - 1024 * 1024; /* Device tree */
     ram_loc = ((char *) emu.ram) + dtb_addr;
-    map_file(&ram_loc, (argc == 3) ? argv[2] : "minimal.dtb");
+    map_file(&ram_loc, (argc >= 3) ? argv[2] : "minimal.dtb");
     /* TODO: load disk image via virtio_blk */
+    /* Load disk image */
+    char *disk_loc = (char *) emu.disk;
+    map_file(&disk_loc, (argc >= 4) ? argv[3] : "ext4.img");
     /* Hook for unmapping files */
     atexit(unmap_files);
 
@@ -339,6 +363,7 @@ static int semu_start(int argc, char **argv)
 #if defined(ENABLE_VIRTIOBLK)
     virtio_blk_init(&(emu.vblk));
     emu.vblk.ram = emu.ram;
+    emu.vblk.disk = emu.disk;
 #endif
 
     /* Emulate */
@@ -355,6 +380,11 @@ static int semu_start(int argc, char **argv)
             virtio_net_refresh_queue(&emu.vnet);
             if (emu.vnet.InterruptStatus)
                 emu_update_vnet_interrupts(&vm);
+#endif
+
+#if defined(ENABLE_VIRTIOBLK)
+            if (emu.vblk.InterruptStatus)
+                emu_update_vblk_interrupts(&vm);
 #endif
         }
 

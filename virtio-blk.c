@@ -20,7 +20,11 @@
 #define VIRTIO_STATUS__DRIVER_OK 4
 #define VIRTIO_STATUS__DEVICE_NEEDS_RESET 64
 
+#define VIRTIO_INT__USED_RING 1
 #define VIRTIO_INT__CONF_CHANGE 2
+
+#define VIRTIO_DESC_F_NEXT 1
+#define VIRTIO_DESC_F_WRITE 2
 
 #define VBLK_FEATURES_0 0
 #define VBLK_FEATURES_1 1 /* VIRTIO_F_VERSION_1 */
@@ -31,7 +35,25 @@
     ((addr) < RAM_SIZE && !((addr) &0b11) ? ((addr) >> 2) \
                                           : (virtio_blk_set_fail(vblk), 0))
 
-enum { VBLK_QUEUE_RX = 0, VBLK_QUEUE_TX = 1 };
+#define VIRTIO_BLK_T_IN 0
+#define VIRTIO_BLK_T_OUT 1
+#define VIRTIO_BLK_T_FLUSH 4
+#define VIRTIO_BLK_T_GET_ID 8
+#define VIRTIO_BLK_T_GET_LIFETIME 10
+#define VIRTIO_BLK_T_DISCARD 11
+#define VIRTIO_BLK_T_WRITE_ZEROES 13
+#define VIRTIO_BLK_T_SECURE_ERASE 14
+
+#define VIRTIO_BLK_S_OK 0
+#define VIRTIO_BLK_S_IOERR 1
+#define VIRTIO_BLK_S_UNSUPP 2
+
+struct virtio_blk_req {
+    uint32_t type;
+    uint32_t reserved;
+    uint64_t sector;
+    uint8_t status;
+} __attribute__((packed));
 
 static void virtio_blk_set_fail(virtio_blk_state_t *vblk)
 {
@@ -50,6 +72,110 @@ static void virtio_blk_update_status(virtio_blk_state_t *vblk, uint32_t status)
     uint32_t *ram = vblk->ram;
     memset(vblk, 0, sizeof(*vblk));
     vblk->ram = ram;
+}
+
+static int virtio_blk_iter_desc(virtio_blk_state_t *vblk,
+                                virtio_blk_queue_t *queue,
+                                uint32_t desc_idx)
+{
+    int plen = sizeof(struct virtio_blk_req);
+
+    int i = 0;
+
+    while (1) {
+        if (desc_idx >= queue->QueueNum) {
+            virtio_blk_set_fail(vblk);
+            return 0;
+        }
+
+        uint32_t *desc = &vblk->ram[queue->QueueDesc + desc_idx * 4];
+        uint32_t desc_addr = desc[0];
+        uint16_t desc_len = desc[2];
+        uint16_t desc_flags = desc[3];
+
+        plen += desc_len;
+
+        if (i == 0) {
+            printf("[VirtIO-Block Header]\n");
+
+            struct virtio_blk_req *vblk_rq =
+                (struct virtio_blk_req *) ((char *) vblk->ram + desc_addr);
+            printf(
+                "* header info => &virtio_blk_req: %lu, type: %d, sector: %ld, "
+                "status: %d\n",
+                (uint64_t) vblk_rq, vblk_rq->type, vblk_rq->sector,
+                vblk_rq->status);
+
+            i++;
+        } else if (!(desc_flags & VIRTIO_DESC_F_NEXT)) {
+            printf("[Virtio-Block Foot]\n");
+
+            uint8_t *foot_info = (uint8_t *) vblk->ram + desc_addr;
+            *foot_info = VIRTIO_BLK_S_OK;
+            printf("* foot info => %d\n", *foot_info);
+            printf("* discriptor info => &desc: %u, len: %d,  flags: %d\n",
+                   desc_addr, desc_len, desc_flags);
+
+            break;
+        } else {
+            printf("[VirtIO-Block Data]\n");
+            memset((char *) vblk->ram + desc_addr, 0, sizeof(char) * desc_len);
+        }
+
+        desc_idx = desc[3] >> 16;
+
+        printf("* discriptor info => &desc: %u, len: %d,  flags: %d\n",
+               desc_addr, desc_len, desc_flags);
+
+        printf("\n");
+    }
+
+    printf("plen: %d\n", plen);
+    return plen;
+}
+
+static void virtio_queue_notify_handler(virtio_blk_state_t *vblk, int index)
+{
+    uint32_t *ram = vblk->ram;
+    virtio_blk_queue_t *queue = &vblk->queues[index];
+    if (vblk->Status & VIRTIO_STATUS__DEVICE_NEEDS_RESET)
+        return;
+
+    if (!((vblk->Status & VIRTIO_STATUS__DRIVER_OK) && queue->ready))
+        return virtio_blk_set_fail(vblk);
+
+    /* check for new buffers */
+    uint16_t new_avail = ram[queue->QueueAvail] >> 16;
+    if (new_avail - queue->last_avail > (uint16_t) queue->QueueNum)
+        return (fprintf(stderr, "size check fail\n"),
+                virtio_blk_set_fail(vblk));
+
+    if (queue->last_avail == new_avail)
+        return;
+
+    /* process them */
+    uint16_t new_used = ram[queue->QueueUsed] >> 16;
+    while (queue->last_avail != new_avail) {
+        uint16_t queue_idx = queue->last_avail % queue->QueueNum;
+        uint16_t buffer_idx = ram[queue->QueueAvail + 1 + queue_idx / 2] >>
+                              (16 * (queue_idx % 2));
+
+        int plen = virtio_blk_iter_desc(vblk, queue, buffer_idx);
+
+        /* consume from available queue, write to used queue */
+        queue->last_avail++;
+        ram[queue->QueueUsed + 1 + (new_used % queue->QueueNum) * 2] =
+            buffer_idx;
+        ram[queue->QueueUsed + 1 + (new_used % queue->QueueNum) * 2 + 1] = plen;
+        new_used++;
+    }
+
+    vblk->ram[queue->QueueUsed] &= MASK(16);
+    vblk->ram[queue->QueueUsed] |= ((uint32_t) new_used) << 16;
+
+    /* send interrupt, unless VIRTQ_AVAIL_F_NO_INTERRUPT is set */
+    if (!(ram[queue->QueueAvail] & 1))
+        vblk->InterruptStatus |= VIRTIO_INT__USED_RING;
 }
 
 static bool virtio_blk_reg_read(virtio_blk_state_t *vblk,
@@ -96,7 +222,6 @@ static bool virtio_blk_reg_read(virtio_blk_state_t *vblk,
         *value = 2;
         return true;
     default:
-        printf("catched %d\n\r", addr);
         return false;
     }
 }
@@ -105,6 +230,8 @@ static bool virtio_blk_reg_write(virtio_blk_state_t *vblk,
                                  uint32_t addr,
                                  uint32_t value)
 {
+    printf("------[VirtIO-Block Write] addr: %d, value: %d\n", addr, value);
+
     switch (addr) {
     case 5: /* DeviceFeaturesSel (W) */
         vblk->DeviceFeaturesSel = value;
@@ -131,9 +258,6 @@ static bool virtio_blk_reg_write(virtio_blk_state_t *vblk,
         VBLK_QUEUE.ready = value & 1;
         if (value & 1)
             VBLK_QUEUE.last_avail = vblk->ram[VBLK_QUEUE.QueueAvail] >> 16;
-        if (vblk->QueueSel == VBLK_QUEUE_RX)
-            vblk->ram[VBLK_QUEUE.QueueAvail] |=
-                1; /* set VIRTQ_AVAIL_F_NO_INTERRUPT */
         return true;
     case 32: /* QueueDescLow (W) */
         VBLK_QUEUE.QueueDesc = VBLK_PREPROCESS_ADDR(value);
@@ -157,11 +281,7 @@ static bool virtio_blk_reg_write(virtio_blk_state_t *vblk,
             virtio_blk_set_fail(vblk);
         return true;
     case 20: /* QueueNotify (W) */
-        if (value < ARRAY_SIZE(vblk->queues)) {
-            printf("------QueueNotify: %d\n\r", value);
-        } else {
-            virtio_blk_set_fail(vblk);
-        }
+        virtio_queue_notify_handler(vblk, value);
         return true;
     case 25: /* InterruptACK (W) */
         vblk->InterruptStatus &= ~value;
