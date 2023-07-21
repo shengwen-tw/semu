@@ -9,11 +9,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sys/uio.h>
 
 #include "device.h"
 #include "riscv.h"
 #include "riscv_private.h"
+
+#define DISK_BLK_SIZE 512
 
 #define VIRTIO_VENDOR_ID 0x12345678
 
@@ -70,8 +73,14 @@ static void virtio_blk_update_status(virtio_blk_state_t *vblk, uint32_t status)
 
     /* Reset */
     uint32_t *ram = vblk->ram;
+    uint32_t *disk = vblk->disk;
+    uint32_t disk_fd = vblk->disk_fd;
+    uint32_t disk_sector_cnt = vblk->disk_sector_cnt;
     memset(vblk, 0, sizeof(*vblk));
     vblk->ram = ram;
+    vblk->disk = disk;
+    vblk->disk_fd = disk_fd;
+    vblk->disk_sector_cnt = disk_sector_cnt;
 }
 
 static int virtio_blk_iter_desc(virtio_blk_state_t *vblk,
@@ -119,7 +128,8 @@ static int virtio_blk_iter_desc(virtio_blk_state_t *vblk,
             break;
         } else {
             printf("[VirtIO-Block Data]\n");
-            memset((char *) vblk->ram + desc_addr, 0, sizeof(char) * desc_len);
+            // memset((char *) vblk->ram + desc_addr, 0, sizeof(char) *
+            // desc_len);
         }
 
         desc_idx = desc[3] >> 16;
@@ -216,10 +226,11 @@ static bool virtio_blk_reg_read(virtio_blk_state_t *vblk,
         *value = 0;
         return true;
     case 64:
-        *value = 0;
+        *value = vblk->disk_sector_cnt;
         return true;
     case 65:
-        *value = 2;
+        *value = vblk->disk_sector_cnt >> 16;
+
         return true;
     default:
         return false;
@@ -340,5 +351,12 @@ void virtio_blk_write(vm_t *vm,
 
 bool virtio_blk_init(virtio_blk_state_t *vblk)
 {
+    struct stat st;
+    fstat(vblk->disk_fd, &st);
+    size_t disk_size = st.st_size;
+
+    vblk->disk_sector_cnt = (disk_size / DISK_BLK_SIZE);
+    vblk->disk_sector_cnt += (disk_size % DISK_BLK_SIZE) ? 1 : 0;
+
     return true;
 }

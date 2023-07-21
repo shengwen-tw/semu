@@ -312,15 +312,15 @@ static int semu_start(int argc, char **argv)
     assert(!(((uintptr_t) emu.ram) & 0b11));
 
     /* Open the disk image */
-    int fd = open("ext4.img", O_RDONLY);
-    if (fd < 0) {
+    int disk_fd = open("ext4.img", O_RDONLY);
+    if (disk_fd < 0) {
         fprintf(stderr, "could not open %s\n", "ext4.img");
         exit(2);
     }
 
     /* Get the disk image size */
     struct stat st;
-    fstat(fd, &st);
+    fstat(disk_fd, &st);
     size_t disk_size = st.st_size;
 
     /* Set up disk */
@@ -361,9 +361,10 @@ static int semu_start(int argc, char **argv)
     emu.vnet.ram = emu.ram;
 #endif
 #if defined(ENABLE_VIRTIOBLK)
-    virtio_blk_init(&(emu.vblk));
     emu.vblk.ram = emu.ram;
     emu.vblk.disk = emu.disk;
+    emu.vblk.disk_fd = disk_fd;
+    virtio_blk_init(&(emu.vblk));
 #endif
 
     /* Emulate */
