@@ -83,6 +83,28 @@ static void virtio_blk_update_status(virtio_blk_state_t *vblk, uint32_t status)
     vblk->disk_sector_cnt = disk_sector_cnt;
 }
 
+static void virtio_blk_write_handler(virtio_blk_state_t *vblk,
+                                     uint64_t sector,
+                                     uint32_t desc_addr,
+                                     uint32_t len)
+{
+    printf("------[VirtIO Block Write] sector: %ld, len: %d\n", sector, len);
+    char *dest = (char *) vblk->disk + (sector * DISK_BLK_SIZE);
+    char *src = (char *) vblk->ram + desc_addr;
+    memcpy(dest, src, len);
+}
+
+static void virtio_blk_read_handler(virtio_blk_state_t *vblk,
+                                    uint64_t sector,
+                                    uint32_t desc_addr,
+                                    uint32_t len)
+{
+    printf("------[VirtIO Block Read] sector: %ld, len: %d\n", sector, len);
+    char *dest = (char *) vblk->ram + desc_addr;
+    char *src = (char *) vblk->disk + (sector * DISK_BLK_SIZE);
+    memcpy(dest, src, len);
+}
+
 static int virtio_blk_iter_desc(virtio_blk_state_t *vblk,
                                 virtio_blk_queue_t *queue,
                                 uint32_t desc_idx)
@@ -90,6 +112,9 @@ static int virtio_blk_iter_desc(virtio_blk_state_t *vblk,
     int plen = sizeof(struct virtio_blk_req);
 
     int i = 0;
+
+    uint32_t type = 0;
+    uint64_t sector = 0;
 
     while (1) {
         if (desc_idx >= queue->QueueNum) {
@@ -105,42 +130,53 @@ static int virtio_blk_iter_desc(virtio_blk_state_t *vblk,
         plen += desc_len;
 
         if (i == 0) {
-            printf("[VirtIO-Block Header]\n");
+            // printf("[VirtIO-Block Header]\n");
 
             struct virtio_blk_req *vblk_rq =
                 (struct virtio_blk_req *) ((char *) vblk->ram + desc_addr);
-            printf(
-                "* header info => &virtio_blk_req: %lu, type: %d, sector: %ld, "
-                "status: %d\n",
-                (uint64_t) vblk_rq, vblk_rq->type, vblk_rq->sector,
-                vblk_rq->status);
+            // printf(
+            //     "* header info => &virtio_blk_req: %lu, type: %d, sector:
+            //     %ld, " "status: %d\n", (uint64_t) vblk_rq, vblk_rq->type,
+            //     vblk_rq->sector, vblk_rq->status);
+
+            type = vblk_rq->type;
+            sector = vblk_rq->sector;
 
             i++;
         } else if (!(desc_flags & VIRTIO_DESC_F_NEXT)) {
-            printf("[Virtio-Block Foot]\n");
+            // printf("[Virtio-Block Foot]\n");
 
             uint8_t *foot_info = (uint8_t *) vblk->ram + desc_addr;
             *foot_info = VIRTIO_BLK_S_OK;
-            printf("* foot info => %d\n", *foot_info);
-            printf("* discriptor info => &desc: %u, len: %d,  flags: %d\n",
-                   desc_addr, desc_len, desc_flags);
+            // printf("* foot info => %d\n", *foot_info);
+            // printf("* discriptor info => &desc: %u, len: %d,  flags: %d\n",
+            //        desc_addr, desc_len, desc_flags);
 
             break;
         } else {
-            printf("[VirtIO-Block Data]\n");
-            // memset((char *) vblk->ram + desc_addr, 0, sizeof(char) *
-            // desc_len);
+            // printf("[VirtIO-Block Data]\n");
+            //  memset((char *) vblk->ram + desc_addr, 0, sizeof(char) *
+            //  desc_len);
+
+            switch (type) {
+            case VIRTIO_BLK_T_IN:
+                virtio_blk_read_handler(vblk, sector, desc_addr, desc_len);
+                break;
+            case VIRTIO_BLK_T_OUT:
+                virtio_blk_write_handler(vblk, sector, desc_addr, desc_len);
+                break;
+            }
         }
 
         desc_idx = desc[3] >> 16;
 
-        printf("* discriptor info => &desc: %u, len: %d,  flags: %d\n",
-               desc_addr, desc_len, desc_flags);
+        // printf("* discriptor info => &desc: %u, len: %d,  flags: %d\n",
+        //        desc_addr, desc_len, desc_flags);
 
-        printf("\n");
+        // printf("\n");
     }
 
-    printf("plen: %d\n", plen);
+    // printf("plen: %d\n", plen);
     return plen;
 }
 
@@ -241,7 +277,7 @@ static bool virtio_blk_reg_write(virtio_blk_state_t *vblk,
                                  uint32_t addr,
                                  uint32_t value)
 {
-    printf("------[VirtIO-Block Write] addr: %d, value: %d\n", addr, value);
+    // printf("------[VirtIO-Block Write] addr: %d, value: %d\n", addr, value);
 
     switch (addr) {
     case 5: /* DeviceFeaturesSel (W) */
