@@ -147,7 +147,7 @@ typedef struct {
     uint32_t *ram;
     uint32_t *disk;
     uint32_t disk_fd;
-    uint32_t disk_sector_cnt;
+    uint64_t capacity;
 } virtio_blk_state_t;
 
 void virtio_blk_read(vm_t *vm,

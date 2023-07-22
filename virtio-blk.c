@@ -51,7 +51,14 @@
 #define VIRTIO_BLK_S_IOERR 1
 #define VIRTIO_BLK_S_UNSUPP 2
 
-struct virtio_blk_req {
+struct virtq_desc {
+    uint32_t addr;
+    uint32_t len;
+    uint16_t flags;
+    uint16_t next;
+};
+
+struct vblk_req_hdr {
     uint32_t type;
     uint32_t reserved;
     uint64_t sector;
@@ -75,12 +82,12 @@ static void virtio_blk_update_status(virtio_blk_state_t *vblk, uint32_t status)
     uint32_t *ram = vblk->ram;
     uint32_t *disk = vblk->disk;
     uint32_t disk_fd = vblk->disk_fd;
-    uint32_t disk_sector_cnt = vblk->disk_sector_cnt;
+    uint32_t capacity = vblk->capacity;
     memset(vblk, 0, sizeof(*vblk));
     vblk->ram = ram;
     vblk->disk = disk;
     vblk->disk_fd = disk_fd;
-    vblk->disk_sector_cnt = disk_sector_cnt;
+    vblk->capacity = capacity;
 }
 
 static void virtio_blk_write_handler(virtio_blk_state_t *vblk,
@@ -109,12 +116,22 @@ static int virtio_blk_iter_desc(virtio_blk_state_t *vblk,
                                 virtio_blk_queue_t *queue,
                                 uint32_t desc_idx)
 {
-    int plen = sizeof(struct virtio_blk_req);
+    /*
+     * A full virtio_blk_req is represented by 3 descriptors, where
+     * the first descriptor contains:
+     *   le32 type
+     *   le32 reserved
+     *   le64 sector
+     * the second descriptor contains:
+     *   u8 data[][512]
+     * the third descriptor contains:
+     *   u8 status
+     */
 
-    int i = 0;
-
-    uint32_t type = 0;
-    uint64_t sector = 0;
+    /* Collect the descriptors */
+    struct virtq_desc vq_desc[3];
+    int desc_cnt = 0;
+    int plen = 0;
 
     while (1) {
         if (desc_idx >= queue->QueueNum) {
@@ -122,61 +139,49 @@ static int virtio_blk_iter_desc(virtio_blk_state_t *vblk,
             return 0;
         }
 
+        /* the size of virtq_desc is 4 words */
         uint32_t *desc = &vblk->ram[queue->QueueDesc + desc_idx * 4];
-        uint32_t desc_addr = desc[0];
-        uint16_t desc_len = desc[2];
-        uint16_t desc_flags = desc[3];
 
-        plen += desc_len;
+        /* retrieve the fields of current descriptor */
+        vq_desc[desc_cnt].addr = desc[0];
+        vq_desc[desc_cnt].len = desc[2];
+        vq_desc[desc_cnt].flags = desc[3];
+        desc_idx = desc[3] >> 16; /* vq_desc[desc_cnt].next */
 
-        if (i == 0) {
-            // printf("[VirtIO-Block Header]\n");
+        plen += vq_desc[desc_cnt].len;
 
-            struct virtio_blk_req *vblk_rq =
-                (struct virtio_blk_req *) ((char *) vblk->ram + desc_addr);
-            // printf(
-            //     "* header info => &virtio_blk_req: %lu, type: %d, sector:
-            //     %ld, " "status: %d\n", (uint64_t) vblk_rq, vblk_rq->type,
-            //     vblk_rq->sector, vblk_rq->status);
-
-            type = vblk_rq->type;
-            sector = vblk_rq->sector;
-
-            i++;
-        } else if (!(desc_flags & VIRTIO_DESC_F_NEXT)) {
-            // printf("[Virtio-Block Foot]\n");
-
-            uint8_t *foot_info = (uint8_t *) vblk->ram + desc_addr;
-            *foot_info = VIRTIO_BLK_S_OK;
-            // printf("* foot info => %d\n", *foot_info);
-            // printf("* discriptor info => &desc: %u, len: %d,  flags: %d\n",
-            //        desc_addr, desc_len, desc_flags);
-
+        if (!(vq_desc[desc_cnt].flags & VIRTIO_DESC_F_NEXT))
             break;
-        } else {
-            // printf("[VirtIO-Block Data]\n");
-            //  memset((char *) vblk->ram + desc_addr, 0, sizeof(char) *
-            //  desc_len);
 
-            switch (type) {
-            case VIRTIO_BLK_T_IN:
-                virtio_blk_read_handler(vblk, sector, desc_addr, desc_len);
-                break;
-            case VIRTIO_BLK_T_OUT:
-                virtio_blk_write_handler(vblk, sector, desc_addr, desc_len);
-                break;
-            }
-        }
-
-        desc_idx = desc[3] >> 16;
-
-        // printf("* discriptor info => &desc: %u, len: %d,  flags: %d\n",
-        //        desc_addr, desc_len, desc_flags);
-
-        // printf("\n");
+        desc_cnt++;
     }
 
-    // printf("plen: %d\n", plen);
+    if (desc_cnt > 3)
+        return 0;
+
+    /* Process the header */
+    struct vblk_req_hdr *hdr =
+        (struct vblk_req_hdr *) ((char *) vblk->ram + vq_desc[0].addr);
+    uint32_t type = hdr->type;
+    uint64_t sector = hdr->sector;
+
+    /* Process the data */
+    switch (type) {
+    case VIRTIO_BLK_T_IN:
+        virtio_blk_read_handler(vblk, sector, vq_desc[1].addr, vq_desc[1].len);
+        break;
+    case VIRTIO_BLK_T_OUT:
+        virtio_blk_write_handler(vblk, sector, vq_desc[1].addr, vq_desc[1].len);
+        break;
+    default:
+        printf("Unsupported virtio-blk operation!\n");
+        break;
+    }
+
+    /* Return the device status */
+    uint8_t *status = (uint8_t *) vblk->ram + vq_desc[2].addr;
+    *status = VIRTIO_BLK_S_OK;
+
     return plen;
 }
 
@@ -261,12 +266,11 @@ static bool virtio_blk_reg_read(virtio_blk_state_t *vblk,
     case 63: /* ConfigGeneration (R) */
         *value = 0;
         return true;
-    case 64:
-        *value = vblk->disk_sector_cnt;
+    case 64: /* CapacityLow (RW) */
+        *value = 0x00000000ffffffff & vblk->capacity;
         return true;
-    case 65:
-        *value = vblk->disk_sector_cnt >> 16;
-
+    case 65: /* CapacityHigh (RW) */
+        *value = vblk->capacity >> 32;
         return true;
     default:
         return false;
@@ -277,8 +281,6 @@ static bool virtio_blk_reg_write(virtio_blk_state_t *vblk,
                                  uint32_t addr,
                                  uint32_t value)
 {
-    // printf("------[VirtIO-Block Write] addr: %d, value: %d\n", addr, value);
-
     switch (addr) {
     case 5: /* DeviceFeaturesSel (W) */
         vblk->DeviceFeaturesSel = value;
@@ -328,7 +330,10 @@ static bool virtio_blk_reg_write(virtio_blk_state_t *vblk,
             virtio_blk_set_fail(vblk);
         return true;
     case 20: /* QueueNotify (W) */
-        virtio_queue_notify_handler(vblk, value);
+        if (value < ARRAY_SIZE(vblk->queues))
+            virtio_queue_notify_handler(vblk, value);
+        else
+            virtio_blk_set_fail(vblk);
         return true;
     case 25: /* InterruptACK (W) */
         vblk->InterruptStatus &= ~value;
@@ -391,8 +396,8 @@ bool virtio_blk_init(virtio_blk_state_t *vblk)
     fstat(vblk->disk_fd, &st);
     size_t disk_size = st.st_size;
 
-    vblk->disk_sector_cnt = (disk_size / DISK_BLK_SIZE);
-    vblk->disk_sector_cnt += (disk_size % DISK_BLK_SIZE) ? 1 : 0;
+    vblk->capacity = (disk_size / DISK_BLK_SIZE);
+    vblk->capacity += (disk_size % DISK_BLK_SIZE) ? 1 : 0;
 
     return true;
 }
