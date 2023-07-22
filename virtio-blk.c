@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
 
@@ -51,12 +52,10 @@ static void virtio_blk_update_status(virtio_blk_state_t *vblk, uint32_t status)
     /* Reset */
     uint32_t *ram = vblk->ram;
     uint32_t *disk = vblk->disk;
-    uint32_t disk_fd = vblk->disk_fd;
     uint32_t capacity = vblk->capacity;
     memset(vblk, 0, sizeof(*vblk));
     vblk->ram = ram;
     vblk->disk = disk;
-    vblk->disk_fd = disk_fd;
     vblk->capacity = capacity;
 }
 
@@ -358,14 +357,36 @@ void virtio_blk_write(vm_t *vm,
     }
 }
 
-bool virtio_blk_init(virtio_blk_state_t *vblk)
+uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file)
 {
+    if (disk_file == NULL) {
+        vblk->capacity = 0;
+        return NULL;
+    }
+
+    int disk_fd = open(disk_file, O_RDWR);
+    if (disk_fd < 0) {
+        fprintf(stderr, "could not open %s\n", disk_file);
+        exit(2);
+    }
+
+    /* Get the disk image size */
     struct stat st;
-    fstat(vblk->disk_fd, &st);
+    fstat(disk_fd, &st);
     size_t disk_size = st.st_size;
 
+    /* Set up disk */
+    uint32_t *disk_mem =
+        mmap(NULL, disk_size, PROT_READ | PROT_WRITE, MAP_SHARED, disk_fd, 0);
+    if (disk_mem == MAP_FAILED) {
+        fprintf(stderr, "Could not map disk\n");
+        return NULL;
+    }
+    assert(!(((uintptr_t) disk_mem) & 0b11));
+
+    vblk->disk = disk_mem;
     vblk->capacity = (disk_size / DISK_BLK_SIZE);
     vblk->capacity += (disk_size % DISK_BLK_SIZE) ? 1 : 0;
 
-    return true;
+    return disk_mem;
 }

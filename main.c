@@ -311,27 +311,6 @@ static int semu_start(int argc, char **argv)
     }
     assert(!(((uintptr_t) emu.ram) & 0b11));
 
-    /* Open the disk image */
-    int disk_fd = open("ext4.img", O_RDWR);
-    if (disk_fd < 0) {
-        fprintf(stderr, "could not open %s\n", "ext4.img");
-        exit(2);
-    }
-
-    /* Get the disk image size */
-    struct stat st;
-    fstat(disk_fd, &st);
-    size_t disk_size = st.st_size;
-
-    /* Set up disk */
-    emu.disk =
-        mmap(NULL, disk_size, PROT_READ | PROT_WRITE, MAP_SHARED, disk_fd, 0);
-    if (emu.disk == MAP_FAILED) {
-        fprintf(stderr, "Could not map disk\n");
-        return 2;
-    }
-    assert(!(((uintptr_t) emu.disk) & 0b11));
-
     char *ram_loc = (char *) emu.ram;
     /* Load Linux kernel image */
     map_file(&ram_loc, argv[1]);
@@ -358,10 +337,9 @@ static int semu_start(int argc, char **argv)
     emu.vnet.ram = emu.ram;
 #endif
 #if defined(ENABLE_VIRTIOBLK)
+    char *disk_file = (argc >= 4) ? argv[3] : NULL;
     emu.vblk.ram = emu.ram;
-    emu.vblk.disk = emu.disk;
-    emu.vblk.disk_fd = disk_fd;
-    virtio_blk_init(&(emu.vblk));
+    emu.disk = virtio_blk_init(&(emu.vblk), disk_file);
 #endif
 
     /* Emulate */
@@ -417,7 +395,7 @@ static int semu_start(int argc, char **argv)
 int main(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("Usage: %s <linux-image> [<dtb>]\n", argv[0]);
+        printf("Usage: %s <linux-image> [<dtb>] [<disk-img>]\n", argv[0]);
         return 2;
     }
     return semu_start(argc, argv);

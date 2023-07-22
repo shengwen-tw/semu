@@ -146,7 +146,6 @@ typedef struct {
     /* supplied by environment */
     uint32_t *ram;
     uint32_t *disk;
-    uint32_t disk_fd;
     uint64_t capacity;
 } virtio_blk_state_t;
 
@@ -162,7 +161,7 @@ void virtio_blk_write(vm_t *vm,
                       uint8_t width,
                       uint32_t value);
 
-bool virtio_blk_init(virtio_blk_state_t *vblk);
+uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file);
 #endif /* ENABLE_VIRTIOBLK */
 
 /* memory mapping */
