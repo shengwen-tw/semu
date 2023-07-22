@@ -158,7 +158,7 @@ static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
     return 0;
 
 virtio_blk_unsupport:
-    *status = VIRTIO_BLK_S_OK;
+    *status = VIRTIO_BLK_S_UNSUPP;
     return 0;
 
 virtio_blk_io_err:
