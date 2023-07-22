@@ -79,9 +79,10 @@ static void virtio_blk_read_handler(virtio_blk_state_t *vblk,
     memcpy(dest, src, len);
 }
 
-static int virtio_blk_iter_desc(virtio_blk_state_t *vblk,
-                                virtio_blk_queue_t *queue,
-                                uint32_t desc_idx)
+static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
+                                   virtio_blk_queue_t *queue,
+                                   uint32_t desc_idx,
+                                   uint32_t *plen)
 {
     /*
      * A full virtio_blk_req is represented by 3 descriptors, where
@@ -98,12 +99,12 @@ static int virtio_blk_iter_desc(virtio_blk_state_t *vblk,
     /* Collect the descriptors */
     struct virtq_desc vq_desc[3];
     int desc_cnt = 0;
-    int plen = 0;
+    int len = 0;
 
     while (1) {
         if (desc_idx >= queue->QueueNum) {
             virtio_blk_set_fail(vblk);
-            return 0;
+            return -1;
         }
 
         /* the size of virtq_desc is 4 words */
@@ -115,24 +116,30 @@ static int virtio_blk_iter_desc(virtio_blk_state_t *vblk,
         vq_desc[desc_cnt].flags = desc[3];
         desc_idx = desc[3] >> 16; /* vq_desc[desc_cnt].next */
 
-        plen += vq_desc[desc_cnt].len;
+        len += vq_desc[desc_cnt].len;
 
         if (!(vq_desc[desc_cnt].flags & VIRTIO_DESC_F_NEXT))
             break;
 
         desc_cnt++;
     }
+    desc_cnt++;
 
-    if (desc_cnt > 3)
-        return 0;
+    if (desc_cnt != 3)
+        return -1;
 
-    /* Process the header */
+    /* process the header */
     struct vblk_req_hdr *hdr =
         (struct vblk_req_hdr *) ((char *) vblk->ram + vq_desc[0].addr);
     uint32_t type = hdr->type;
     uint64_t sector = hdr->sector;
+    uint8_t *status = (uint8_t *) vblk->ram + vq_desc[2].addr;
 
-    /* Process the data */
+    /* sector check */
+    if (sector > vblk->capacity)
+        goto virtio_blk_io_err;
+
+    /* process the data */
     switch (type) {
     case VIRTIO_BLK_T_IN:
         virtio_blk_read_handler(vblk, sector, vq_desc[1].addr, vq_desc[1].len);
@@ -141,15 +148,22 @@ static int virtio_blk_iter_desc(virtio_blk_state_t *vblk,
         virtio_blk_write_handler(vblk, sector, vq_desc[1].addr, vq_desc[1].len);
         break;
     default:
-        printf("Unsupported virtio-blk operation!\n");
-        break;
+        fprintf(stderr, "unsupported virtio-blk operation!\n");
+        goto virtio_blk_unsupport;
     }
 
-    /* Return the device status */
-    uint8_t *status = (uint8_t *) vblk->ram + vq_desc[2].addr;
+    /* return the device status */
     *status = VIRTIO_BLK_S_OK;
+    *plen = len;
+    return 0;
 
-    return plen;
+virtio_blk_unsupport:
+    *status = VIRTIO_BLK_S_OK;
+    return 0;
+
+virtio_blk_io_err:
+    *status = VIRTIO_BLK_S_IOERR;
+    return 0;
 }
 
 static void virtio_queue_notify_handler(virtio_blk_state_t *vblk, int index)
@@ -178,13 +192,19 @@ static void virtio_queue_notify_handler(virtio_blk_state_t *vblk, int index)
         uint16_t buffer_idx = ram[queue->QueueAvail + 1 + queue_idx / 2] >>
                               (16 * (queue_idx % 2));
 
-        int plen = virtio_blk_iter_desc(vblk, queue, buffer_idx);
+        /* consume request from the available queue and process the data in the
+         * descriptor list */
+        uint32_t plen = 0;
+        int result = virtio_blk_desc_handler(vblk, queue, buffer_idx, &plen);
+        if (result != 0)
+            return virtio_blk_set_fail(vblk);
 
-        /* consume from available queue, write to used queue */
+        /* write used element information (virtq_used_elem) to the used queue */
         queue->last_avail++;
         ram[queue->QueueUsed + 1 + (new_used % queue->QueueNum) * 2] =
-            buffer_idx;
-        ram[queue->QueueUsed + 1 + (new_used % queue->QueueNum) * 2 + 1] = plen;
+            buffer_idx;  // le32 id
+        ram[queue->QueueUsed + 1 + (new_used % queue->QueueNum) * 2 + 1] =
+            plen;  // le32 len
         new_used++;
     }
 
@@ -364,18 +384,19 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file)
         return NULL;
     }
 
+    /* open disk file */
     int disk_fd = open(disk_file, O_RDWR);
     if (disk_fd < 0) {
         fprintf(stderr, "could not open %s\n", disk_file);
         exit(2);
     }
 
-    /* Get the disk image size */
+    /* get the disk image size */
     struct stat st;
     fstat(disk_fd, &st);
     size_t disk_size = st.st_size;
 
-    /* Set up disk */
+    /* set up disk */
     uint32_t *disk_mem =
         mmap(NULL, disk_size, PROT_READ | PROT_WRITE, MAP_SHARED, disk_fd, 0);
     if (disk_mem == MAP_FAILED) {
