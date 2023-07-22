@@ -65,7 +65,6 @@ static void virtio_blk_write_handler(virtio_blk_state_t *vblk,
                                      uint32_t desc_addr,
                                      uint32_t len)
 {
-    printf("------[VirtIO Block Write] sector: %ld, len: %d\n", sector, len);
     char *dest = (char *) vblk->disk + (sector * DISK_BLK_SIZE);
     char *src = (char *) vblk->ram + desc_addr;
     memcpy(dest, src, len);
@@ -76,7 +75,6 @@ static void virtio_blk_read_handler(virtio_blk_state_t *vblk,
                                     uint32_t desc_addr,
                                     uint32_t len)
 {
-    printf("------[VirtIO Block Read] sector: %ld, len: %d\n", sector, len);
     char *dest = (char *) vblk->ram + desc_addr;
     char *src = (char *) vblk->disk + (sector * DISK_BLK_SIZE);
     memcpy(dest, src, len);

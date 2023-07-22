@@ -312,7 +312,7 @@ static int semu_start(int argc, char **argv)
     assert(!(((uintptr_t) emu.ram) & 0b11));
 
     /* Open the disk image */
-    int disk_fd = open("ext4.img", O_RDONLY);
+    int disk_fd = open("ext4.img", O_RDWR);
     if (disk_fd < 0) {
         fprintf(stderr, "could not open %s\n", "ext4.img");
         exit(2);
@@ -324,8 +324,8 @@ static int semu_start(int argc, char **argv)
     size_t disk_size = st.st_size;
 
     /* Set up disk */
-    emu.disk = mmap(NULL, disk_size, PROT_READ | PROT_WRITE,
-                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    emu.disk =
+        mmap(NULL, disk_size, PROT_READ | PROT_WRITE, MAP_SHARED, disk_fd, 0);
     if (emu.disk == MAP_FAILED) {
         fprintf(stderr, "Could not map disk\n");
         return 2;
@@ -340,9 +340,6 @@ static int semu_start(int argc, char **argv)
     ram_loc = ((char *) emu.ram) + dtb_addr;
     map_file(&ram_loc, (argc >= 3) ? argv[2] : "minimal.dtb");
     /* TODO: load disk image via virtio_blk */
-    /* Load disk image */
-    char *disk_loc = (char *) emu.disk;
-    map_file(&disk_loc, (argc >= 4) ? argv[3] : "ext4.img");
     /* Hook for unmapping files */
     atexit(unmap_files);
 
