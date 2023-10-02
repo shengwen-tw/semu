@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,6 +12,7 @@
 #include "device.h"
 #include "riscv.h"
 #include "riscv_private.h"
+#include "window.h"
 
 /* Define fetch separately since it is simpler (fixed width, already checked
  * alignment, only main RAM is executable).
@@ -70,6 +72,18 @@ static void emu_update_vblk_interrupts(vm_t *vm)
 }
 #endif
 
+#if SEMU_HAS(VIRTIOGPU)
+static void emu_update_vgpu_interrupts(vm_t *vm)
+{
+    emu_state_t *data = (emu_state_t *) vm->priv;
+    if (data->vgpu.InterruptStatus)
+        data->plic.active |= IRQ_VGPU_BIT;
+    else
+        data->plic.active &= ~IRQ_VGPU_BIT;
+    plic_update_interrupts(vm, &data->plic);
+}
+#endif
+
 static void mem_load(vm_t *vm, uint32_t addr, uint8_t width, uint32_t *value)
 {
     emu_state_t *data = (emu_state_t *) vm->priv;
@@ -102,6 +116,12 @@ static void mem_load(vm_t *vm, uint32_t addr, uint8_t width, uint32_t *value)
         case 0x42: /* virtio-blk */
             virtio_blk_read(vm, &data->vblk, addr & 0xFFFFF, width, value);
             emu_update_vblk_interrupts(vm);
+            return;
+#endif
+#if SEMU_HAS(VIRTIOGPU)
+        case 0x43: /* virtio-gpu */
+            virtio_gpu_read(vm, &data->vgpu, addr & 0xFFFFF, width, value);
+            emu_update_vgpu_interrupts(vm);
             return;
 #endif
         }
@@ -141,6 +161,12 @@ static void mem_store(vm_t *vm, uint32_t addr, uint8_t width, uint32_t value)
         case 0x42: /* virtio-blk */
             virtio_blk_write(vm, &data->vblk, addr & 0xFFFFF, width, value);
             emu_update_vblk_interrupts(vm);
+            return;
+#endif
+#if SEMU_HAS(VIRTIOGPU)
+        case 0x43: /* virtio-gpu */
+            virtio_gpu_write(vm, &data->vgpu, addr & 0xFFFFF, width, value);
+            emu_update_vgpu_interrupts(vm);
             return;
 #endif
         }
@@ -422,6 +448,12 @@ static int semu_start(int argc, char **argv)
     emu.vblk.ram = emu.ram;
     emu.disk = virtio_blk_init(&(emu.vblk), disk_file);
 #endif
+#if SEMU_HAS(VIRTIOGPU)
+    emu.vgpu.ram = emu.ram;
+    virtio_gpu_init(&(emu.vgpu));
+    virtio_gpu_add_scanout(&(emu.vgpu), 1024, 768);
+    display_window_init();
+#endif
 
     /* Emulate */
     uint32_t peripheral_update_ctr = 0;
@@ -442,6 +474,11 @@ static int semu_start(int argc, char **argv)
 #if SEMU_HAS(VIRTIOBLK)
             if (emu.vblk.InterruptStatus)
                 emu_update_vblk_interrupts(&vm);
+#endif
+
+#if SEMU_HAS(VIRTIOGPU)
+            if (emu.vgpu.InterruptStatus)
+                emu_update_vgpu_interrupts(&vm);
 #endif
         }
 
