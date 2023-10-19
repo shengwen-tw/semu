@@ -9,7 +9,10 @@ A minimalist RISC-V system emulator capable of running Linux the kernel and corr
 - UART: 8250/16550
 - PLIC (platform-level interrupt controller): 32 interrupts, no priority
 - Standard SBI, with the timer extension
-- VirtIO: virtio-blk acquires disk image from the host, and virtio-net is mapped as TAP interface
+- VirtIO:
+    - virtio-net: Mapped with TAP interface to the host
+    - virtio-blk: Acquires disk image from the host to the guest
+    - virtio-gpu: Currently supports 2D rendering mode with SDL as front-end
 
 ## Prerequisites
 
@@ -35,6 +38,28 @@ For most GNU/Linux distributions, `mkfs.ext4` command should be installed in adv
 For macOS, use the following command:
 ```shell
 $ brew install e2fsprogs
+```
+
+### SDL2 Installation
+
+```
+git clone https://github.com/libsdl-org/SDL.git -b SDL2
+cd SDL
+mkdir build
+cd build
+../configure
+make
+sudo make install
+```
+
+### Pixman Installation
+
+```
+git clone https://github.com/libpixman/pixman.git
+cd pixman/
+./autogen.sh 
+make -j$(nproc)
+sudo make install
 ```
 
 ## Build and Run
