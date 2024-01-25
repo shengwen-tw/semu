@@ -3,10 +3,13 @@ include mk/common.mk
 CC ?= gcc
 CFLAGS := -O2 -g -Wall -Wextra
 CFLAGS += -include common.h
+LDFLAGS :=
 
 OBJS_EXTRA :=
 # command line option
 OPTS :=
+
+LDFLAGS += -lpthread
 
 # virtio-blk
 ENABLE_VIRTIOBLK ?= 1
@@ -34,6 +37,37 @@ endif
 $(call set-feature, VIRTIONET)
 ifeq ($(call has, VIRTIONET), 1)
     OBJS_EXTRA += virtio-net.o
+endif
+
+# virtio-gpu
+ENABLE_VIRTIOGPU ?= 1
+ifneq ($(UNAME_S),Linux)
+    ENABLE_VIRTIOGPU := 0
+endif
+$(call set-feature, VIRTIOGPU)
+ifeq ($(call has, VIRTIOGPU), 1)
+    OBJS_EXTRA += virtio-gpu.o
+endif
+
+# SDL2
+ENABLE_SDL ?= 1
+ifeq ($(call has, SDL), 1)
+ifeq (, $(shell which sdl2-config))
+$(warning No sdl2-config in $$PATH. Check SDL2 installation in advance)
+override ENABLE_SDL := 0
+endif
+CFLAGS += `sdl2-config --cflags`
+LDFLAGS += `sdl2-config --libs`
+OBJS_EXTRA += window.o
+endif
+
+# Pixman
+ENABLE_PIXMAN ?= 1
+ifeq (, $(shell pkg-config --cflags pixman-1)) #XXX
+$(warning Pixman is not installed. Check README.md for installation instructions)
+else
+CFLAGS += `pkg-config --cflags pixman-1`
+LDFLAGS += `pkg-config --libs pixman-1`
 endif
 
 BIN = semu
