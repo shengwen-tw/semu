@@ -12,14 +12,20 @@ jobs:
             sudo apt update
             sudo apt-get install build-essential device-tree-compiler
             sudo apt-get install libsdl2-dev libsdl2-2.0-0 libsdl2-image-dev libsdl2-image-2.0-0
-            sudo apt install libpixman-1-dev
+            sudo apt-get install libpixman-1-dev
             sudo apt-get install expect
     - name: default build
       run: make
       shell: bash
+    - name: Setup xvfb for screen 0
+      run: Xvfb :1 -screen 0 1600x1200x24 &
     - name: automated test
       run: .ci/autorun.sh
       shell: bash
+      env:
+        DISPLAY: :1
+    - name: Tear down xvfb
+      run: killall Xvfb
 
   coding_style:
     runs-on: ubuntu-22.04
