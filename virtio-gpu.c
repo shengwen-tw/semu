@@ -1,7 +1,6 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <pixman.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,6 +29,8 @@
 
 #define PRIV(x) ((struct vgpu_scanout_info *) x->priv)
 
+#define STRIDE_SIZE 4096
+
 struct vgpu_scanout_info {
     uint32_t width;
     uint32_t height;
@@ -39,13 +40,14 @@ struct vgpu_scanout_info {
 struct vgpu_resource_2d {
     uint32_t resource_id;
     uint32_t scanout_id;
-    uint32_t pixman_format;
     uint32_t sdl_format;
     uint32_t width;
     uint32_t height;
+    uint32_t *image;
+    uint32_t bits_per_pixel;
+    uint32_t stride;
     size_t page_cnt;
     struct iovec *iovec;
-    pixman_image_t *image;
     struct list_head list;
 };
 
@@ -191,7 +193,7 @@ static int destroy_vgpu_resource_2d(uint32_t resource_id)
 
     /* Release the resource */
     if (res_2d->image)
-        pixman_image_unref(res_2d->image);
+        free(res_2d->image);
     list_del(&res_2d->list);
     free(res_2d->iovec);
     free(res_2d);
@@ -238,7 +240,7 @@ static void virtio_gpu_update_status(virtio_gpu_state_t *vgpu, uint32_t status)
 
         list_del(&res_2d->list);
         if (res_2d->image)
-            pixman_image_unref(res_2d->image);
+            free(res_2d->image);
         if (res_2d->iovec)
             free(res_2d->iovec);
         free(res_2d);
@@ -286,40 +288,40 @@ static void virtio_gpu_resource_create_2d_handler(virtio_gpu_state_t *vgpu,
     }
 
     /* Select image formats */
-    uint32_t pixman_format, sdl_format;
+    uint32_t sdl_format, bits_per_pixel;
 
     switch (request->format) {
     case VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM:
-        pixman_format = PIXMAN_b8g8r8a8;
         sdl_format = SDL_PIXELFORMAT_ARGB8888;
+        bits_per_pixel = 32;
         break;
     case VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM:
-        pixman_format = PIXMAN_b8g8r8x8;
         sdl_format = SDL_PIXELFORMAT_XRGB8888;
+        bits_per_pixel = 32;
         break;
     case VIRTIO_GPU_FORMAT_A8R8G8B8_UNORM:
-        pixman_format = PIXMAN_a8r8g8b8;
         sdl_format = SDL_PIXELFORMAT_BGRA8888;
+        bits_per_pixel = 32;
         break;
     case VIRTIO_GPU_FORMAT_X8R8G8B8_UNORM:
-        pixman_format = PIXMAN_x8r8g8b8;
         sdl_format = SDL_PIXELFORMAT_BGRX8888;
+        bits_per_pixel = 32;
         break;
     case VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM:
-        pixman_format = PIXMAN_r8g8b8a8;
         sdl_format = SDL_PIXELFORMAT_ABGR8888;
+        bits_per_pixel = 32;
         break;
     case VIRTIO_GPU_FORMAT_X8B8G8R8_UNORM:
-        pixman_format = PIXMAN_x8b8g8r8;
         sdl_format = SDL_PIXELFORMAT_RGBX8888;
+        bits_per_pixel = 32;
         break;
     case VIRTIO_GPU_FORMAT_A8B8G8R8_UNORM:
-        pixman_format = PIXMAN_a8b8g8r8;
         sdl_format = SDL_PIXELFORMAT_RGBA8888;
+        bits_per_pixel = 32;
         break;
     case VIRTIO_GPU_FORMAT_R8G8B8X8_UNORM:
-        pixman_format = PIXMAN_r8g8b8x8;
         sdl_format = SDL_PIXELFORMAT_XBGR8888;
+        bits_per_pixel = 32;
         break;
     default:
         fprintf(stderr, "%s(): Unsupported format %d\n", __func__,
@@ -328,17 +330,20 @@ static void virtio_gpu_resource_create_2d_handler(virtio_gpu_state_t *vgpu,
         return;
     }
 
+    uint32_t bytes_per_pixel = bits_per_pixel / 8;
+
     /* Set 2D resource */
     res_2d->width = request->width;
     res_2d->height = request->height;
-    res_2d->pixman_format = pixman_format;
     res_2d->sdl_format = sdl_format;
-    res_2d->image = pixman_image_create_bits(pixman_format, request->width,
-                                             request->height, NULL, 0);
+    res_2d->bits_per_pixel = bits_per_pixel;
+    res_2d->stride = STRIDE_SIZE;
+    res_2d->image = malloc(bytes_per_pixel * (request->width + res_2d->stride) *
+                           request->height);
 
-    /* Failed to create pixman image */
+    /* Failed to create image buffer */
     if (!res_2d->image) {
-        fprintf(stderr, "%s(): Failed to allocate pixman image\n", __func__);
+        fprintf(stderr, "%s(): Failed to allocate image buffer\n", __func__);
         virtio_gpu_set_fail(vgpu);
         return;
     }
@@ -562,8 +567,9 @@ static void virtio_gpu_cmd_resource_flush_handler(virtio_gpu_state_t *vgpu,
         acquire_vgpu_resource_2d(request->resource_id);
 
     /* Trigger display window rendering */
-    display_window_render(res_2d->scanout_id, res_2d->image, res_2d->sdl_format,
-                          res_2d->width, res_2d->height);
+    display_window_render(res_2d->scanout_id, res_2d->image,
+                          res_2d->bits_per_pixel, res_2d->stride,
+                          res_2d->sdl_format, res_2d->width, res_2d->height);
 
     /* Write response */
     struct vgpu_ctrl_hdr *response =
@@ -606,14 +612,13 @@ static void virtio_gpu_cmd_transfer_to_host_2d_handler(
     }
 
     /* Transfer frame data from guest to host */
-    uint32_t stride = pixman_image_get_stride(res_2d->image);
-    pixman_format_code_t format = res_2d->pixman_format;
-    uint32_t bpp = PIXMAN_FORMAT_BPP(format) / 8; /* bytes per pixel */
+    uint32_t stride = res_2d->stride;
+    uint32_t bpp = res_2d->bits_per_pixel / 8; /* Bytes per pixel */
     uint32_t width =
         (req->r.width < res_2d->width) ? req->r.width : res_2d->width;
     uint32_t height =
         (req->r.height < res_2d->height) ? req->r.height : res_2d->height;
-    void *img_data = pixman_image_get_data(res_2d->image);
+    void *img_data = (void *) res_2d->image;
 
     for (uint32_t h = 0; h < height; h++) {
         size_t src_offset = req->offset + stride * h;

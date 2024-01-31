@@ -1,4 +1,3 @@
-#include <pixman.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <signal.h>
@@ -20,7 +19,9 @@ struct display_info {
     uint32_t width;
     uint32_t height;
     uint32_t sdl_format;
-    pixman_image_t *image;
+    uint32_t *image;
+    uint32_t bits_per_pixel;
+    uint32_t stride;
     SDL_mutex *img_mtx;
     SDL_cond *img_cond;
     SDL_Thread *thread_id;
@@ -94,16 +95,10 @@ int display_window_thread(void *data)
             SDL_PollEvent(&e);  // TODO: Handle events
         }
 
-        /* Prepare image */
-        void *img_data = pixman_image_get_data(display->image);
-        pixman_format_code_t format = pixman_image_get_format(display->image);
-        uint32_t stride = pixman_image_get_stride(display->image);
-        uint32_t depth = PIXMAN_FORMAT_BPP(format);
-
         /* Render image */
         display->surface = SDL_CreateRGBSurfaceWithFormatFrom(
-            img_data, display->width, display->height, depth, stride,
-            display->sdl_format);
+            display->image, display->width, display->height,
+            display->bits_per_pixel, display->stride, display->sdl_format);
         display->texture =
             SDL_CreateTextureFromSurface(display->renderer, display->surface);
         SDL_RenderCopy(display->renderer, display->texture, NULL, NULL);
@@ -125,7 +120,9 @@ void display_resource_unlock(uint32_t id)
 }
 
 void display_window_render(uint32_t id,
-                           pixman_image_t *image,
+                           uint32_t *image,
+                           uint32_t bits_per_pixel,
+                           uint32_t stride,
                            uint32_t sdl_format,
                            uint32_t width,
                            uint32_t height)
@@ -133,6 +130,8 @@ void display_window_render(uint32_t id,
     displays[id].width = width;
     displays[id].height = height;
     displays[id].image = image;
+    displays[id].bits_per_pixel = bits_per_pixel;
+    displays[id].stride = stride;
     displays[id].sdl_format = sdl_format;
     SDL_CondSignal(displays[id].img_cond);
 }

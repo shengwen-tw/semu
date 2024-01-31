@@ -61,15 +61,6 @@ LDFLAGS += `sdl2-config --libs`
 OBJS_EXTRA += window.o
 endif
 
-# Pixman
-ENABLE_PIXMAN ?= 1
-ifeq (, $(shell pkg-config --cflags pixman-1)) #XXX
-$(warning Pixman is not installed. Check README.md for installation instructions)
-else
-CFLAGS += `pkg-config --cflags pixman-1`
-LDFLAGS += `pkg-config --libs pixman-1`
-endif
-
 BIN = semu
 all: $(BIN) minimal.dtb
 
