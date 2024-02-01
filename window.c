@@ -133,11 +133,37 @@ void window_render(void *resource)
     struct gpu_resource *display = (struct gpu_resource *) resource;
     int id = display->display_id;
 
+    switch (display->format) {
+    case VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM:
+        displays[id].format = SDL_PIXELFORMAT_ARGB8888;
+        break;
+    case VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM:
+        displays[id].format = SDL_PIXELFORMAT_XRGB8888;
+        break;
+    case VIRTIO_GPU_FORMAT_A8R8G8B8_UNORM:
+        displays[id].format = SDL_PIXELFORMAT_BGRA8888;
+        break;
+    case VIRTIO_GPU_FORMAT_X8R8G8B8_UNORM:
+        displays[id].format = SDL_PIXELFORMAT_BGRX8888;
+        break;
+    case VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM:
+        displays[id].format = SDL_PIXELFORMAT_ABGR8888;
+        break;
+    case VIRTIO_GPU_FORMAT_X8B8G8R8_UNORM:
+        displays[id].format = SDL_PIXELFORMAT_RGBX8888;
+        break;
+    case VIRTIO_GPU_FORMAT_A8B8G8R8_UNORM:
+        displays[id].format = SDL_PIXELFORMAT_RGBA8888;
+        break;
+    case VIRTIO_GPU_FORMAT_R8G8B8X8_UNORM:
+        displays[id].format = SDL_PIXELFORMAT_XBGR8888;
+        break;
+    }
+
     displays[id].width = display->width;
     displays[id].height = display->height;
     displays[id].image = display->image;
     displays[id].bits_per_pixel = display->bits_per_pixel;
     displays[id].stride = display->stride;
-    displays[id].format = display->format;
     SDL_CondSignal(displays[id].img_cond);
 }

@@ -290,39 +290,31 @@ static void virtio_gpu_resource_create_2d_handler(virtio_gpu_state_t *vgpu,
     }
 
     /* Select image formats */
-    uint32_t format, bits_per_pixel;
+    uint32_t bits_per_pixel;
 
     switch (request->format) {
     case VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM:
-        format = SDL_PIXELFORMAT_ARGB8888;
         bits_per_pixel = 32;
         break;
     case VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM:
-        format = SDL_PIXELFORMAT_XRGB8888;
         bits_per_pixel = 32;
         break;
     case VIRTIO_GPU_FORMAT_A8R8G8B8_UNORM:
-        format = SDL_PIXELFORMAT_BGRA8888;
         bits_per_pixel = 32;
         break;
     case VIRTIO_GPU_FORMAT_X8R8G8B8_UNORM:
-        format = SDL_PIXELFORMAT_BGRX8888;
         bits_per_pixel = 32;
         break;
     case VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM:
-        format = SDL_PIXELFORMAT_ABGR8888;
         bits_per_pixel = 32;
         break;
     case VIRTIO_GPU_FORMAT_X8B8G8R8_UNORM:
-        format = SDL_PIXELFORMAT_RGBX8888;
         bits_per_pixel = 32;
         break;
     case VIRTIO_GPU_FORMAT_A8B8G8R8_UNORM:
-        format = SDL_PIXELFORMAT_RGBA8888;
         bits_per_pixel = 32;
         break;
     case VIRTIO_GPU_FORMAT_R8G8B8X8_UNORM:
-        format = SDL_PIXELFORMAT_XBGR8888;
         bits_per_pixel = 32;
         break;
     default:
@@ -337,7 +329,7 @@ static void virtio_gpu_resource_create_2d_handler(virtio_gpu_state_t *vgpu,
     /* Set 2D resource */
     res_2d->width = request->width;
     res_2d->height = request->height;
-    res_2d->format = format;
+    res_2d->format = request->format;
     res_2d->bits_per_pixel = bits_per_pixel;
     res_2d->stride = STRIDE_SIZE;
     res_2d->image = malloc(bytes_per_pixel * (request->width + res_2d->stride) *
@@ -369,6 +361,7 @@ static void virtio_gpu_cmd_resource_unref_handler(virtio_gpu_state_t *vgpu,
     struct vgpu_res_unref *request =
         vgpu_mem_host_to_guest(vgpu, vq_desc[0].addr);
 
+#ifdef ENABLE_SDL
     /* Acquire 2D resource */
     struct vgpu_resource_2d *res_2d =
         acquire_vgpu_resource_2d(request->resource_id);
@@ -376,8 +369,11 @@ static void virtio_gpu_cmd_resource_unref_handler(virtio_gpu_state_t *vgpu,
     /* Destroy 2D resource */
     uint32_t scanout_id = res_2d->scanout_id;
     display_resource_lock(scanout_id);
+#endif
     int result = destroy_vgpu_resource_2d(request->resource_id);
+#ifdef ENABLE_SDL
     display_resource_unlock(scanout_id);
+#endif
 
     if (result != 0) {
         fprintf(stderr, "%s(): Failed to destroy 2D resource\n", __func__);
@@ -560,6 +556,7 @@ static void virtio_gpu_cmd_resource_flush_handler(virtio_gpu_state_t *vgpu,
                                                   struct virtq_desc *vq_desc,
                                                   uint32_t *plen)
 {
+#ifdef ENABLE_SDL
     /* Read request */
     struct vgpu_res_flush *request =
         vgpu_mem_host_to_guest(vgpu, vq_desc[0].addr);
@@ -570,6 +567,7 @@ static void virtio_gpu_cmd_resource_flush_handler(virtio_gpu_state_t *vgpu,
 
     /* Trigger display window rendering */
     window_render((void *) res_2d);
+#endif
 
     /* Write response */
     struct vgpu_ctrl_hdr *response =
@@ -1078,7 +1076,9 @@ void virtio_gpu_add_scanout(virtio_gpu_state_t *vgpu,
     PRIV(vgpu)[scanout_num].height = height;
     PRIV(vgpu)[scanout_num].enabled = 1;
 
+#ifdef ENABLE_SDL
     window_add(width, height);
+#endif
 
     vgpu_configs.num_scanouts++;
 }

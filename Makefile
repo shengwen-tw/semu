@@ -50,7 +50,7 @@ ifeq ($(call has, VIRTIOGPU), 1)
 endif
 
 # SDL2
-ENABLE_SDL := 1
+ENABLE_SDL ?= 1
 ifeq (, $(shell which sdl2-config))
     $(warning No sdl2-config in $$PATH. Check SDL2 installation in advance)
     override ENABLE_SDL := 0
@@ -58,6 +58,7 @@ endif
 
 ifeq ($(ENABLE_VIRTIOGPU),1)
 ifeq ($(ENABLE_SDL),1)
+    CFLAGS += -DENABLE_SDL
     CFLAGS += $(shell sdl2-config --cflags)
     LDFLAGS += $(shell sdl2-config --libs)
     OBJS_EXTRA += window.o

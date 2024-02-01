@@ -1,6 +1,6 @@
 #pragma once
 
-#if SEMU_HAS(VIRTIOGPU)
+#ifdef ENABLE_SDL
 #include <SDL.h>
 
 void window_init(void);
