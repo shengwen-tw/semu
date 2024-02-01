@@ -368,11 +368,11 @@ static void virtio_gpu_cmd_resource_unref_handler(virtio_gpu_state_t *vgpu,
 
     /* Destroy 2D resource */
     uint32_t scanout_id = res_2d->scanout_id;
-    display_resource_lock(scanout_id);
+    window_lock(scanout_id);
 #endif
     int result = destroy_vgpu_resource_2d(request->resource_id);
 #ifdef ENABLE_SDL
-    display_resource_unlock(scanout_id);
+    window_unlock(scanout_id);
 #endif
 
     if (result != 0) {

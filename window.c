@@ -118,12 +118,12 @@ void window_init(void)
     }
 }
 
-void display_resource_lock(uint32_t id)
+void window_lock(uint32_t id)
 {
     SDL_LockMutex(displays[id].img_mtx);
 }
 
-void display_resource_unlock(uint32_t id)
+void window_unlock(uint32_t id)
 {
     SDL_UnlockMutex(displays[id].img_mtx);
 }
