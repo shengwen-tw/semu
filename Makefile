@@ -56,8 +56,8 @@ ifeq (, $(shell which sdl2-config))
 $(warning No sdl2-config in $$PATH. Check SDL2 installation in advance)
 override ENABLE_SDL := 0
 endif
-CFLAGS += `sdl2-config --cflags`
-LDFLAGS += `sdl2-config --libs`
+CFLAGS += $(shell sdl2-config --cflags)
+LDFLAGS += $(shell sdl2-config --libs)
 OBJS_EXTRA += window.o
 endif
 
