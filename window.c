@@ -101,8 +101,8 @@ void window_init(void)
         displays[i].img_cond = SDL_CreateCond();
 
         sprintf(thread_name, "sdl thread %d", i);
-        displays[i].thread_id = SDL_CreateThread(
-            window_thread, thread_name, (void *) &displays[i]);
+        displays[i].thread_id =
+            SDL_CreateThread(window_thread, thread_name, (void *) &displays[i]);
         SDL_DetachThread(displays[i].thread_id);
     }
 }
