@@ -194,8 +194,7 @@ static int destroy_vgpu_resource_2d(uint32_t resource_id)
         return -1;
 
     /* Release the resource */
-    if (res_2d->image)
-        free(res_2d->image);
+    free(res_2d->image);
     list_del(&res_2d->list);
     free(res_2d->iovec);
     free(res_2d);
@@ -241,10 +240,8 @@ static void virtio_gpu_update_status(virtio_gpu_state_t *vgpu, uint32_t status)
             list_entry(curr, struct vgpu_resource_2d, list);
 
         list_del(&res_2d->list);
-        if (res_2d->image)
-            free(res_2d->image);
-        if (res_2d->iovec)
-            free(res_2d->iovec);
+        free(res_2d->image);
+        free(res_2d->iovec);
         free(res_2d);
     }
 }
