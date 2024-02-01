@@ -1,7 +1,7 @@
 include mk/common.mk
 
 CC ?= gcc
-CFLAGS := -O2 -g -Wall -Wextra -Wno-unused-function
+CFLAGS := -O2 -g -Wall -Wextra
 CFLAGS += -include common.h
 LDFLAGS :=
 
