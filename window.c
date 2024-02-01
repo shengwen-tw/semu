@@ -13,10 +13,21 @@
 
 #define SDL_COND_TIMEOUT 1 /* ms */
 
+/* Public interface to vgpu_resource_2d structure */
+struct gpu_resource {
+    uint32_t display_id;
+    uint32_t format;
+    uint32_t width;
+    uint32_t height;
+    uint32_t bits_per_pixel;
+    uint32_t stride;
+    uint32_t *image;
+};
+
 struct display_info {
     uint32_t width;
     uint32_t height;
-    uint32_t sdl_format;
+    uint32_t format;
     uint32_t *image;
     uint32_t bits_per_pixel;
     uint32_t stride;
@@ -76,7 +87,7 @@ int window_thread(void *data)
         /* Render image */
         display->surface = SDL_CreateRGBSurfaceWithFormatFrom(
             display->image, display->width, display->height,
-            display->bits_per_pixel, display->stride, display->sdl_format);
+            display->bits_per_pixel, display->stride, display->format);
         display->texture =
             SDL_CreateTextureFromSurface(display->renderer, display->surface);
         SDL_RenderCopy(display->renderer, display->texture, NULL, NULL);
@@ -117,19 +128,16 @@ void display_resource_unlock(uint32_t id)
     SDL_UnlockMutex(displays[id].img_mtx);
 }
 
-void window_render(uint32_t id,
-                   uint32_t *image,
-                   uint32_t bits_per_pixel,
-                   uint32_t stride,
-                   uint32_t sdl_format,
-                   uint32_t width,
-                   uint32_t height)
+void window_render(void *resource)
 {
-    displays[id].width = width;
-    displays[id].height = height;
-    displays[id].image = image;
-    displays[id].bits_per_pixel = bits_per_pixel;
-    displays[id].stride = stride;
-    displays[id].sdl_format = sdl_format;
+    struct gpu_resource *display = (struct gpu_resource *) resource;
+    int id = display->display_id;
+
+    displays[id].width = display->width;
+    displays[id].height = display->height;
+    displays[id].image = display->image;
+    displays[id].bits_per_pixel = display->bits_per_pixel;
+    displays[id].stride = display->stride;
+    displays[id].format = display->format;
     SDL_CondSignal(displays[id].img_cond);
 }

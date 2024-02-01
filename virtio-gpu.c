@@ -38,14 +38,16 @@ struct vgpu_scanout_info {
 };
 
 struct vgpu_resource_2d {
-    uint32_t resource_id;
+    /* Public: */
     uint32_t scanout_id;
-    uint32_t sdl_format;
+    uint32_t format;
     uint32_t width;
     uint32_t height;
-    uint32_t *image;
     uint32_t bits_per_pixel;
     uint32_t stride;
+    uint32_t *image;
+    /* Private: */
+    uint32_t resource_id;
     size_t page_cnt;
     struct iovec *iovec;
     struct list_head list;
@@ -288,39 +290,39 @@ static void virtio_gpu_resource_create_2d_handler(virtio_gpu_state_t *vgpu,
     }
 
     /* Select image formats */
-    uint32_t sdl_format, bits_per_pixel;
+    uint32_t format, bits_per_pixel;
 
     switch (request->format) {
     case VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM:
-        sdl_format = SDL_PIXELFORMAT_ARGB8888;
+        format = SDL_PIXELFORMAT_ARGB8888;
         bits_per_pixel = 32;
         break;
     case VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM:
-        sdl_format = SDL_PIXELFORMAT_XRGB8888;
+        format = SDL_PIXELFORMAT_XRGB8888;
         bits_per_pixel = 32;
         break;
     case VIRTIO_GPU_FORMAT_A8R8G8B8_UNORM:
-        sdl_format = SDL_PIXELFORMAT_BGRA8888;
+        format = SDL_PIXELFORMAT_BGRA8888;
         bits_per_pixel = 32;
         break;
     case VIRTIO_GPU_FORMAT_X8R8G8B8_UNORM:
-        sdl_format = SDL_PIXELFORMAT_BGRX8888;
+        format = SDL_PIXELFORMAT_BGRX8888;
         bits_per_pixel = 32;
         break;
     case VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM:
-        sdl_format = SDL_PIXELFORMAT_ABGR8888;
+        format = SDL_PIXELFORMAT_ABGR8888;
         bits_per_pixel = 32;
         break;
     case VIRTIO_GPU_FORMAT_X8B8G8R8_UNORM:
-        sdl_format = SDL_PIXELFORMAT_RGBX8888;
+        format = SDL_PIXELFORMAT_RGBX8888;
         bits_per_pixel = 32;
         break;
     case VIRTIO_GPU_FORMAT_A8B8G8R8_UNORM:
-        sdl_format = SDL_PIXELFORMAT_RGBA8888;
+        format = SDL_PIXELFORMAT_RGBA8888;
         bits_per_pixel = 32;
         break;
     case VIRTIO_GPU_FORMAT_R8G8B8X8_UNORM:
-        sdl_format = SDL_PIXELFORMAT_XBGR8888;
+        format = SDL_PIXELFORMAT_XBGR8888;
         bits_per_pixel = 32;
         break;
     default:
@@ -335,7 +337,7 @@ static void virtio_gpu_resource_create_2d_handler(virtio_gpu_state_t *vgpu,
     /* Set 2D resource */
     res_2d->width = request->width;
     res_2d->height = request->height;
-    res_2d->sdl_format = sdl_format;
+    res_2d->format = format;
     res_2d->bits_per_pixel = bits_per_pixel;
     res_2d->stride = STRIDE_SIZE;
     res_2d->image = malloc(bytes_per_pixel * (request->width + res_2d->stride) *
@@ -567,9 +569,7 @@ static void virtio_gpu_cmd_resource_flush_handler(virtio_gpu_state_t *vgpu,
         acquire_vgpu_resource_2d(request->resource_id);
 
     /* Trigger display window rendering */
-    window_render(res_2d->scanout_id, res_2d->image, res_2d->bits_per_pixel,
-                  res_2d->stride, res_2d->sdl_format, res_2d->width,
-                  res_2d->height);
+    window_render((void *) res_2d);
 
     /* Write response */
     struct vgpu_ctrl_hdr *response =
