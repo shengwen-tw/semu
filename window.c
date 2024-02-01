@@ -50,7 +50,7 @@ void window_add(uint32_t width, uint32_t height)
     display_cnt++;
 }
 
-int window_thread(void *data)
+static int window_thread(void *data)
 {
     struct display_info *display = (struct display_info *) data;
 
