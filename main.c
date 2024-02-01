@@ -453,7 +453,7 @@ static int semu_start(int argc, char **argv)
     emu.vgpu.ram = emu.ram;
     virtio_gpu_init(&(emu.vgpu));
     virtio_gpu_add_scanout(&(emu.vgpu), 1024, 768);
-    display_window_init();
+    window_init();
 #endif
 
     /* Emulate */

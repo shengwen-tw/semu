@@ -13,8 +13,6 @@
 
 #define SDL_COND_TIMEOUT 1 /* ms */
 
-int display_window_thread(void *data);
-
 struct display_info {
     uint32_t width;
     uint32_t height;
@@ -34,34 +32,14 @@ struct display_info {
 static struct display_info displays[VIRTIO_GPU_MAX_SCANOUTS];
 static int display_cnt;
 
-void display_window_add(uint32_t width, uint32_t height)
+void window_add(uint32_t width, uint32_t height)
 {
     displays[display_cnt].width = width;
     displays[display_cnt].height = height;
     display_cnt++;
 }
 
-void display_window_init(void)
-{
-    char thread_name[100] = {0};
-
-    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-        fprintf(stderr, "%s(): failed to initialize SDL\n", __func__);
-        exit(2);
-    }
-
-    for (int i = 0; i < display_cnt; i++) {
-        displays[i].img_mtx = SDL_CreateMutex();
-        displays[i].img_cond = SDL_CreateCond();
-
-        sprintf(thread_name, "sdl thread %d", i);
-        displays[i].thread_id = SDL_CreateThread(
-            display_window_thread, thread_name, (void *) &displays[i]);
-        SDL_DetachThread(displays[i].thread_id);
-    }
-}
-
-int display_window_thread(void *data)
+int window_thread(void *data)
 {
     struct display_info *display = (struct display_info *) data;
 
@@ -109,6 +87,26 @@ int display_window_thread(void *data)
     }
 }
 
+void window_init(void)
+{
+    char thread_name[100] = {0};
+
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        fprintf(stderr, "%s(): failed to initialize SDL\n", __func__);
+        exit(2);
+    }
+
+    for (int i = 0; i < display_cnt; i++) {
+        displays[i].img_mtx = SDL_CreateMutex();
+        displays[i].img_cond = SDL_CreateCond();
+
+        sprintf(thread_name, "sdl thread %d", i);
+        displays[i].thread_id = SDL_CreateThread(
+            window_thread, thread_name, (void *) &displays[i]);
+        SDL_DetachThread(displays[i].thread_id);
+    }
+}
+
 void display_resource_lock(uint32_t id)
 {
     SDL_LockMutex(displays[id].img_mtx);
@@ -119,13 +117,13 @@ void display_resource_unlock(uint32_t id)
     SDL_UnlockMutex(displays[id].img_mtx);
 }
 
-void display_window_render(uint32_t id,
-                           uint32_t *image,
-                           uint32_t bits_per_pixel,
-                           uint32_t stride,
-                           uint32_t sdl_format,
-                           uint32_t width,
-                           uint32_t height)
+void window_render(uint32_t id,
+                   uint32_t *image,
+                   uint32_t bits_per_pixel,
+                   uint32_t stride,
+                   uint32_t sdl_format,
+                   uint32_t width,
+                   uint32_t height)
 {
     displays[id].width = width;
     displays[id].height = height;

@@ -567,9 +567,9 @@ static void virtio_gpu_cmd_resource_flush_handler(virtio_gpu_state_t *vgpu,
         acquire_vgpu_resource_2d(request->resource_id);
 
     /* Trigger display window rendering */
-    display_window_render(res_2d->scanout_id, res_2d->image,
-                          res_2d->bits_per_pixel, res_2d->stride,
-                          res_2d->sdl_format, res_2d->width, res_2d->height);
+    window_render(res_2d->scanout_id, res_2d->image,
+                  res_2d->bits_per_pixel, res_2d->stride,
+                  res_2d->sdl_format, res_2d->width, res_2d->height);
 
     /* Write response */
     struct vgpu_ctrl_hdr *response =
@@ -1078,7 +1078,7 @@ void virtio_gpu_add_scanout(virtio_gpu_state_t *vgpu,
     PRIV(vgpu)[scanout_num].height = height;
     PRIV(vgpu)[scanout_num].enabled = 1;
 
-    display_window_add(width, height);
+    window_add(width, height);
 
     vgpu_configs.num_scanouts++;
 }
