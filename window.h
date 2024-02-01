@@ -1,5 +1,6 @@
 #pragma once
 
+#if SEMU_HAS(VIRTIOGPU)
 #include <SDL.h>
 
 void window_init(void);
@@ -13,3 +14,4 @@ void window_render(uint32_t id,
                            uint32_t height);
 void display_resource_lock(uint32_t id);
 void display_resource_unlock(uint32_t id);
+#endif
