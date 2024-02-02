@@ -1,36 +1,30 @@
-#include <pthread.h>
-#include <semaphore.h>
-#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
 #include <SDL.h>
+#include <SDL_thread.h>
 
 #include "virtio.h"
 #include "window.h"
 
 #define SDL_COND_TIMEOUT 1 /* ms */
 
-/* Public interface to vgpu_resource_2d structure */
+/* Public interface to the vgpu_resource_2d structure */
 struct gpu_resource {
-    uint32_t display_id;
+    uint32_t scanout_id;
     uint32_t format;
     uint32_t width;
     uint32_t height;
-    uint32_t bits_per_pixel;
     uint32_t stride;
+    uint32_t bits_per_pixel;
     uint32_t *image;
 };
 
 struct display_info {
-    uint32_t width;
-    uint32_t height;
-    uint32_t format;
-    uint32_t *image;
-    uint32_t bits_per_pixel;
-    uint32_t stride;
+    struct gpu_resource resource;
+    uint32_t sdl_format;
     SDL_mutex *img_mtx;
     SDL_cond *img_cond;
     SDL_Thread *thread_id;
@@ -45,19 +39,20 @@ static int display_cnt;
 
 void window_add(uint32_t width, uint32_t height)
 {
-    displays[display_cnt].width = width;
-    displays[display_cnt].height = height;
+    displays[display_cnt].resource.width = width;
+    displays[display_cnt].resource.height = height;
     display_cnt++;
 }
 
 static int window_thread(void *data)
 {
     struct display_info *display = (struct display_info *) data;
+    struct gpu_resource *resource = &display->resource;
 
     /* Create SDL window */
-    display->window = SDL_CreateWindow("Semu", SDL_WINDOWPOS_UNDEFINED,
-                                       SDL_WINDOWPOS_UNDEFINED, display->width,
-                                       display->height, SDL_WINDOW_SHOWN);
+    display->window = SDL_CreateWindow("semu", SDL_WINDOWPOS_UNDEFINED,
+                                       SDL_WINDOWPOS_UNDEFINED, resource->width,
+                                       resource->height, SDL_WINDOW_SHOWN);
 
     if (!display->window) {
         fprintf(stderr, "%s(): failed to create window\n", __func__);
@@ -86,8 +81,8 @@ static int window_thread(void *data)
 
         /* Render image */
         display->surface = SDL_CreateRGBSurfaceWithFormatFrom(
-            display->image, display->width, display->height,
-            display->bits_per_pixel, display->stride, display->format);
+            resource->image, resource->width, resource->height,
+            resource->bits_per_pixel, resource->stride, display->sdl_format);
         display->texture =
             SDL_CreateTextureFromSurface(display->renderer, display->surface);
         SDL_RenderCopy(display->renderer, display->texture, NULL, NULL);
@@ -100,7 +95,7 @@ static int window_thread(void *data)
 
 void window_init(void)
 {
-    char thread_name[100] = {0};
+    char thread_name[20] = {0};
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         fprintf(stderr, "%s(): failed to initialize SDL\n", __func__);
@@ -128,42 +123,49 @@ void window_unlock(uint32_t id)
     SDL_UnlockMutex(displays[id].img_mtx);
 }
 
-void window_render(void *resource)
+static bool virtio_gpu_to_sdl_format(uint32_t virtio_gpu_format,
+                                     uint32_t *sdl_format)
 {
-    struct gpu_resource *display = (struct gpu_resource *) resource;
-    int id = display->display_id;
-
-    switch (display->format) {
+    switch (virtio_gpu_format) {
     case VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM:
-        displays[id].format = SDL_PIXELFORMAT_ARGB8888;
-        break;
+        *sdl_format = SDL_PIXELFORMAT_ARGB8888;
+        return true;
     case VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM:
-        displays[id].format = SDL_PIXELFORMAT_XRGB8888;
-        break;
+        *sdl_format = SDL_PIXELFORMAT_XRGB8888;
+        return true;
     case VIRTIO_GPU_FORMAT_A8R8G8B8_UNORM:
-        displays[id].format = SDL_PIXELFORMAT_BGRA8888;
-        break;
+        *sdl_format = SDL_PIXELFORMAT_BGRA8888;
+        return true;
     case VIRTIO_GPU_FORMAT_X8R8G8B8_UNORM:
-        displays[id].format = SDL_PIXELFORMAT_BGRX8888;
-        break;
+        *sdl_format = SDL_PIXELFORMAT_BGRX8888;
+        return true;
     case VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM:
-        displays[id].format = SDL_PIXELFORMAT_ABGR8888;
-        break;
+        *sdl_format = SDL_PIXELFORMAT_ABGR8888;
+        return true;
     case VIRTIO_GPU_FORMAT_X8B8G8R8_UNORM:
-        displays[id].format = SDL_PIXELFORMAT_RGBX8888;
-        break;
+        *sdl_format = SDL_PIXELFORMAT_RGBX8888;
+        return true;
     case VIRTIO_GPU_FORMAT_A8B8G8R8_UNORM:
-        displays[id].format = SDL_PIXELFORMAT_RGBA8888;
-        break;
+        *sdl_format = SDL_PIXELFORMAT_RGBA8888;
+        return true;
     case VIRTIO_GPU_FORMAT_R8G8B8X8_UNORM:
-        displays[id].format = SDL_PIXELFORMAT_XBGR8888;
-        break;
+        *sdl_format = SDL_PIXELFORMAT_XBGR8888;
+        return true;
+    default:
+        return false;
     }
+}
 
-    displays[id].width = display->width;
-    displays[id].height = display->height;
-    displays[id].image = display->image;
-    displays[id].bits_per_pixel = display->bits_per_pixel;
-    displays[id].stride = display->stride;
-    SDL_CondSignal(displays[id].img_cond);
+void window_render(void *_resource)
+{
+    struct gpu_resource *resource = (struct gpu_resource *) _resource;
+    int id = resource->scanout_id;
+
+    /* Resource update */
+    memcpy(&displays[id].resource, resource, sizeof(struct gpu_resource));
+    bool legal_format =
+        virtio_gpu_to_sdl_format(resource->format, &displays[id].sdl_format);
+
+    if (legal_format)
+        SDL_CondSignal(displays[id].img_cond);
 }
