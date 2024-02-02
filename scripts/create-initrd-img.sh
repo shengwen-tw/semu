@@ -18,7 +18,7 @@ for file in $MODULES; do
     cp $file rootfs/modules
 done
 
-cp scripts/run.sh rootfs
+cp guest/run.sh rootfs
 
 # kernel objects of virtio-gpu and root files requires ~35MiB of space
 dd if=/dev/zero of=${IMG} bs=4k count=9000
