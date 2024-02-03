@@ -1,21 +1,27 @@
 #!/usr/bin/bash
 
 IMG=ext4.img
+KERNEL_VER=6.1.77
+SRC=linux/out/lib/modules/$KERNEL_VER
+DEST=rootfs/lib/modules/$KERNEL_VER
 
-mkdir -p rootfs
-mkdir -p rootfs/modules
+FILES='kernel/drivers/gpu/drm/drm.ko
+       kernel/drivers/gpu/drm/drm_kms_helper.ko
+       kernel/drivers/gpu/drm/drm_panel_orientation_quirks.ko
+       kernel/drivers/gpu/drm/drm_shmem_helper.ko
+       kernel/drivers/gpu/drm/virtio/virtio-gpu.ko
+       kernel/drivers/i2c/algos/i2c-algo-bit.ko
+       kernel/drivers/i2c/i2c-core.ko
+       kernel/drivers/virtio/virtio_dma_buf.ko
+       modules.dep'
 
-MODULES='linux/drivers/i2c/i2c-core.ko 
-         linux/drivers/i2c/algos/i2c-algo-bit.ko 
-         linux/drivers/virtio/virtio_dma_buf.ko 
-         linux/drivers/gpu/drm/drm_kms_helper.ko 
-         linux/drivers/gpu/drm/virtio/virtio-gpu.ko 
-         linux/drivers/gpu/drm/drm.ko 
-         linux/drivers/gpu/drm/drm_shmem_helper.ko 
-         linux/drivers/gpu/drm/drm_panel_orientation_quirks.ko'
+mkdir -p $DEST/kernel/drivers/gpu/drm/
+mkdir -p $DEST/kernel/drivers/gpu/drm/virtio/
+mkdir -p $DEST/kernel/drivers/i2c/algos/
+mkdir -p $DEST/kernel/drivers/virtio/
 
-for file in $MODULES; do
-    cp $file rootfs/modules
+for file in $FILES; do
+    cp -f $SRC/$file $DEST/$file
 done
 
 cp guest/run.sh rootfs

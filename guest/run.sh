@@ -3,8 +3,7 @@
 # Run this script to install virtio-gpu module into
 # the guest Linux system
 
-mkdir -p /lib/modules/$(uname -r)
-cp ./modules/*.ko /lib/modules/$(uname -r)
+mkdir -p /lib/modules/
+cp -r ./lib/modules/* /lib/modules/
 
-depmod -a
 modprobe virtio-gpu
