@@ -44,10 +44,6 @@ ENABLE_VIRTIOGPU ?= 1
 ifneq ($(UNAME_S),Linux)
     ENABLE_VIRTIOGPU := 0
 endif
-$(call set-feature, VIRTIOGPU)
-ifeq ($(call has, VIRTIOGPU), 1)
-    OBJS_EXTRA += virtio-gpu.o
-endif
 
 # SDL2
 ENABLE_SDL ?= 1
@@ -56,14 +52,20 @@ ifeq (, $(shell which sdl2-config))
     override ENABLE_SDL := 0
 endif
 
-ifeq ($(ENABLE_VIRTIOGPU),1)
+ifeq ($(ENABLE_SDL),0)
+    override ENABLE_VIRTIOGPU := 0
+endif
+
 ifeq ($(ENABLE_SDL),1)
-    CFLAGS += -DENABLE_SDL
+ifeq ($(ENABLE_VIRTIOGPU),1)
     CFLAGS += $(shell sdl2-config --cflags)
     LDFLAGS += $(shell sdl2-config --libs)
     OBJS_EXTRA += window.o
+    OBJS_EXTRA += virtio-gpu.o
 endif
 endif
+
+$(call set-feature, VIRTIOGPU)
 
 BIN = semu
 all: $(BIN) minimal.dtb

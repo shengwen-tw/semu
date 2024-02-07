@@ -358,7 +358,6 @@ static void virtio_gpu_cmd_resource_unref_handler(virtio_gpu_state_t *vgpu,
     struct vgpu_res_unref *request =
         vgpu_mem_host_to_guest(vgpu, vq_desc[0].addr);
 
-#ifdef ENABLE_SDL
     /* Acquire 2D resource */
     struct vgpu_resource_2d *res_2d =
         acquire_vgpu_resource_2d(request->resource_id);
@@ -366,11 +365,8 @@ static void virtio_gpu_cmd_resource_unref_handler(virtio_gpu_state_t *vgpu,
     /* Destroy 2D resource */
     uint32_t scanout_id = res_2d->scanout_id;
     window_lock(scanout_id);
-#endif
     int result = destroy_vgpu_resource_2d(request->resource_id);
-#ifdef ENABLE_SDL
     window_unlock(scanout_id);
-#endif
 
     if (result != 0) {
         fprintf(stderr, "%s(): Failed to destroy 2D resource\n", __func__);
@@ -553,7 +549,6 @@ static void virtio_gpu_cmd_resource_flush_handler(virtio_gpu_state_t *vgpu,
                                                   struct virtq_desc *vq_desc,
                                                   uint32_t *plen)
 {
-#ifdef ENABLE_SDL
     /* Read request */
     struct vgpu_res_flush *request =
         vgpu_mem_host_to_guest(vgpu, vq_desc[0].addr);
@@ -564,7 +559,6 @@ static void virtio_gpu_cmd_resource_flush_handler(virtio_gpu_state_t *vgpu,
 
     /* Trigger display window rendering */
     window_render((void *) res_2d);
-#endif
 
     /* Write response */
     struct vgpu_ctrl_hdr *response =
@@ -1073,9 +1067,7 @@ void virtio_gpu_add_scanout(virtio_gpu_state_t *vgpu,
     PRIV(vgpu)[scanout_num].height = height;
     PRIV(vgpu)[scanout_num].enabled = 1;
 
-#ifdef ENABLE_SDL
     window_add(width, height);
-#endif
 
     vgpu_configs.num_scanouts++;
 }
