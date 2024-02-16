@@ -558,7 +558,7 @@ static void virtio_gpu_cmd_resource_flush_handler(virtio_gpu_state_t *vgpu,
         acquire_vgpu_resource_2d(request->resource_id);
 
     /* Trigger display window rendering */
-    window_render((void *) res_2d);
+    window_render((struct gpu_resource *) res_2d);
 
     /* Write response */
     struct vgpu_ctrl_hdr *response =

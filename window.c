@@ -11,17 +11,6 @@
 
 #define SDL_COND_TIMEOUT 1 /* ms */
 
-/* Public interface to the vgpu_resource_2d structure */
-struct gpu_resource {
-    uint32_t scanout_id;
-    uint32_t format;
-    uint32_t width;
-    uint32_t height;
-    uint32_t stride;
-    uint32_t bits_per_pixel;
-    uint32_t *image;
-};
-
 struct display_info {
     struct gpu_resource resource;
     uint32_t sdl_format;
@@ -156,9 +145,8 @@ static bool virtio_gpu_to_sdl_format(uint32_t virtio_gpu_format,
     }
 }
 
-void window_render(void *_resource)
+void window_render(struct gpu_resource *resource)
 {
-    struct gpu_resource *resource = (struct gpu_resource *) _resource;
     int id = resource->scanout_id;
 
     /* Resource update */
