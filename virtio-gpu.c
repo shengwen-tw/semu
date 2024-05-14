@@ -185,7 +185,7 @@ static struct vgpu_resource_2d *acquire_vgpu_resource_2d(uint32_t resource_id)
     return NULL;
 }
 
-static int destroy_vgpu_resource_2d(uint32_t resource_id)
+static int destroy_vgpu_resource_2d(uint32_t scanout_id, uint32_t resource_id)
 {
     struct vgpu_resource_2d *res_2d = acquire_vgpu_resource_2d(resource_id);
 
@@ -193,11 +193,15 @@ static int destroy_vgpu_resource_2d(uint32_t resource_id)
     if (!res_2d)
         return -1;
 
+    window_lock(resource_id);
+
     /* Release the resource */
     free(res_2d->image);
     list_del(&res_2d->list);
     free(res_2d->iovec);
     free(res_2d);
+
+    window_unlock(resource_id);
 
     return 0;
 }
@@ -363,10 +367,8 @@ static void virtio_gpu_cmd_resource_unref_handler(virtio_gpu_state_t *vgpu,
         acquire_vgpu_resource_2d(request->resource_id);
 
     /* Destroy 2D resource */
-    uint32_t scanout_id = res_2d->scanout_id;
-    window_lock(scanout_id);
-    int result = destroy_vgpu_resource_2d(request->resource_id);
-    window_unlock(scanout_id);
+    int result =
+        destroy_vgpu_resource_2d(res_2d->scanout_id, request->resource_id);
 
     if (result != 0) {
         fprintf(stderr, "%s(): Failed to destroy 2D resource\n", __func__);
@@ -710,6 +712,36 @@ static void virtio_gpu_cmd_resource_attach_backing_handler(
     *plen = sizeof(*response);
 }
 
+static void virtio_gpu_cmd_update_cursor_handler(virtio_gpu_state_t *vgpu,
+                                                 struct virtq_desc *vq_desc,
+                                                 uint32_t *plen)
+{
+    /* Write response */
+    struct vgpu_ctrl_hdr *response =
+        vgpu_mem_host_to_guest(vgpu, vq_desc[1].addr);
+
+    memset(response, 0, sizeof(*response));
+    response->type = VIRTIO_GPU_RESP_OK_NODATA;
+
+    /* Return write length */
+    *plen = sizeof(*response);
+}
+
+static void virtio_gpu_cmd_move_cursor_handler(virtio_gpu_state_t *vgpu,
+                                               struct virtq_desc *vq_desc,
+                                               uint32_t *plen)
+{
+    /* Write response */
+    struct vgpu_ctrl_hdr *response =
+        vgpu_mem_host_to_guest(vgpu, vq_desc[1].addr);
+
+    memset(response, 0, sizeof(*response));
+    response->type = VIRTIO_GPU_RESP_OK_NODATA;
+
+    /* Return write length */
+    *plen = sizeof(*response);
+}
+
 static int virtio_gpu_desc_handler(virtio_gpu_state_t *vgpu,
                                    const virtio_gpu_queue_t *queue,
                                    uint32_t desc_idx,
@@ -766,6 +798,12 @@ static int virtio_gpu_desc_handler(virtio_gpu_state_t *vgpu,
         break;
     case VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING:
         virtio_gpu_cmd_resource_attach_backing_handler(vgpu, vq_desc, plen);
+        break;
+    case VIRTIO_GPU_CMD_UPDATE_CURSOR:
+        virtio_gpu_cmd_update_cursor_handler(vgpu, vq_desc, plen);
+        break;
+    case VIRTIO_GPU_CMD_MOVE_CURSOR:
+        virtio_gpu_cmd_move_cursor_handler(vgpu, vq_desc, plen);
         break;
     default:
         fprintf(stderr, "%s(): unknown command %d\n", __func__, header->type);

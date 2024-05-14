@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 
 IMG=ext4.img
-KERNEL_VER=6.1.77
+KERNEL_VER=6.1.90
 SRC=linux/out/lib/modules/$KERNEL_VER
 DEST=rootfs/lib/modules/$KERNEL_VER
 
