@@ -12,7 +12,8 @@
     chosen {
         bootargs = "earlycon console=ttyS0";
         stdout-path = "serial0";
-        linux,initrd-start = <0x1dc00000>; /* @476 MiB (476 * 1024 * 1024)     */
+        /* XXX: 105MiB */
+        linux,initrd-start = <0x19600000>; /* @406 MiB (406 * 1024 * 1024)     */
         linux,initrd-end = <0x1fefffff>;   /* @511 MiB (511 * 1024 * 1024 - 1) */
     };
 

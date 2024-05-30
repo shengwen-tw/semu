@@ -7,7 +7,7 @@
 
 #define RAM_SIZE (512 * 1024 * 1024)
 #define DTB_SIZE (1 * 1024 * 1024)
-#define INITRD_SIZE (35 * 1024 * 1024)
+#define INITRD_SIZE (105 * 1024 * 1024)
 
 void ram_read(vm_t *core,
               uint32_t *mem,
