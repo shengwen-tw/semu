@@ -52,5 +52,36 @@ function do_linux
     popd
 }
 
+function do_directfb
+{
+    mkdir -p directfb
+    ASSERT git clone https://github.com/directfb2/DirectFB2.git
+    export PATH=$PATH:$PWD/buildroot/output/host/bin
+    export BUILDROOT_OUT=$PWD/buildroot/output/
+    pushd DirectFB2
+    wget https://gist.githubusercontent.com/shengwen-tw/e5dffd8aefd7d2019cfbb4b7f1048ef3/raw/b079443aefb965742a6c6227fe4d0cf831d87cb1/riscv-directfb2.patch
+    git apply riscv-directfb2.patch
+    ASSERT wget https://gist.githubusercontent.com/shengwen-tw/098da8c41ba7fbb9162ddaa4ff62b29e/raw/5ab962990d19a8bd1a8f378ef9b0b0ef1c5fb36a/riscv-cross-file
+    ASSERT meson --cross-file riscv-cross-file build/riscv
+    ASSERT meson compile -C build/riscv
+    DESTDIR=$BUILDROOT_OUT/host/riscv32-buildroot-linux-gnu/sysroot meson install -C build/riscv
+    DESTDIR=../../../directfb meson install -C build/riscv
+    popd
+}
+
+function do_directfb_examples
+{
+    ASSERT git clone https://github.com/directfb2/DirectFB-examples.git
+    export PATH=$PATH:$PWD/buildroot/output/host/bin
+    pushd DirectFB-examples/
+    ASSERT wget https://gist.githubusercontent.com/shengwen-tw/098da8c41ba7fbb9162ddaa4ff62b29e/raw/5ab962990d19a8bd1a8f378ef9b0b0ef1c5fb36a/riscv-cross-file
+    ASSERT meson --cross-file riscv-cross-file build/riscv
+    ASSERT meson compile -C build/riscv
+    DESTDIR=../../../directfb meson install -C build/riscv
+    popd
+}
+
 do_buildroot && OK
 do_linux && OK
+do_directfb && OK
+do_directfb_examples && OK
