@@ -11,6 +11,7 @@
 #include "device.h"
 #include "riscv.h"
 #include "riscv_private.h"
+#include "window.h"
 
 #define PRIV(x) ((emu_state_t *) x->priv)
 
@@ -68,6 +69,18 @@ static void emu_update_vblk_interrupts(vm_t *vm)
         data->plic.active |= IRQ_VBLK_BIT;
     else
         data->plic.active &= ~IRQ_VBLK_BIT;
+    plic_update_interrupts(vm, &data->plic);
+}
+#endif
+
+#if SEMU_HAS(VIRTIOGPU)
+static void emu_update_vgpu_interrupts(vm_t *vm)
+{
+    emu_state_t *data = PRIV(vm->hart[0]);
+    if (data->vgpu.InterruptStatus)
+        data->plic.active |= IRQ_VGPU_BIT;
+    else
+        data->plic.active &= ~IRQ_VGPU_BIT;
     plic_update_interrupts(vm, &data->plic);
 }
 #endif
@@ -137,6 +150,12 @@ static void mem_load(hart_t *hart,
             aclint_sswi_read(hart, &data->sswi, addr & 0xFFFFF, width, value);
             aclint_sswi_update_interrupts(hart, &data->sswi);
             return;
+#if SEMU_HAS(VIRTIOGPU)
+        case 0x46: /* virtio-gpu */
+            virtio_gpu_read(hart, &data->vgpu, addr & 0xFFFFF, width, value);
+            emu_update_vgpu_interrupts(hart->vm);
+            return;
+#endif
         }
     }
     vm_set_exception(hart, RV_EXC_LOAD_FAULT, hart->exc_val);
@@ -191,6 +210,12 @@ static void mem_store(hart_t *hart,
             aclint_sswi_write(hart, &data->sswi, addr & 0xFFFFF, width, value);
             aclint_sswi_update_interrupts(hart, &data->sswi);
             return;
+#if SEMU_HAS(VIRTIOGPU)
+        case 0x46: /* virtio-gpu */
+            virtio_gpu_write(hart, &data->vgpu, addr & 0xFFFFF, width, value);
+            emu_update_vgpu_interrupts(hart->vm);
+            return;
+#endif
         }
     }
     vm_set_exception(hart, RV_EXC_STORE_FAULT, hart->exc_val);
@@ -623,6 +648,12 @@ static int semu_start(int argc, char **argv)
     emu.mtimer.mtimecmp = calloc(vm.n_hart, sizeof(uint64_t));
     emu.mswi.msip = calloc(vm.n_hart, sizeof(uint32_t));
     emu.sswi.ssip = calloc(vm.n_hart, sizeof(uint32_t));
+#if SEMU_HAS(VIRTIOGPU)
+    emu.vgpu.ram = emu.ram;
+    virtio_gpu_init(&(emu.vgpu));
+    virtio_gpu_add_scanout(&(emu.vgpu), 1024, 768);
+    window_init();
+#endif
 
     /* Emulate */
     uint32_t peripheral_update_ctr = 0;
@@ -647,6 +678,11 @@ static int semu_start(int argc, char **argv)
 #if SEMU_HAS(VIRTIOBLK)
                 if (emu.vblk.InterruptStatus)
                     emu_update_vblk_interrupts(&vm);
+#endif
+
+#if SEMU_HAS(VIRTIOGPU)
+                if (emu.vgpu.InterruptStatus)
+                    emu_update_vgpu_interrupts(&vm);
 #endif
             }
 
