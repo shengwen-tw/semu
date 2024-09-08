@@ -695,6 +695,8 @@ static int semu_start(int argc, char **argv)
     emu.mswi.msip = calloc(vm.n_hart, sizeof(uint32_t));
     emu.sswi.ssip = calloc(vm.n_hart, sizeof(uint32_t));
 #if SEMU_HAS(VIRTIOGPU)
+    semu_virgl_init();
+
     emu.vgpu.ram = emu.ram;
     virtio_gpu_init(&(emu.vgpu));
     virtio_gpu_add_scanout(&(emu.vgpu), 1024, 768);
