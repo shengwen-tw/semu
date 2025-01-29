@@ -11,9 +11,12 @@
 #include "device.h"
 #include "riscv.h"
 #include "riscv_private.h"
+#include "virgl.h"
 #include "window.h"
 
 #define PRIV(x) ((emu_state_t *) x->priv)
+
+extern const struct window_backend g_window;
 
 /* Define fetch separately since it is simpler (fixed width, already checked
  * alignment, only main RAM is executable).
@@ -722,18 +725,22 @@ static int semu_start(int argc, char **argv)
     emu.mtimer.mtimecmp = calloc(vm.n_hart, sizeof(uint64_t));
     emu.mswi.msip = calloc(vm.n_hart, sizeof(uint32_t));
     emu.sswi.ssip = calloc(vm.n_hart, sizeof(uint32_t));
-#if SEMU_HAS(VIRTIOGPU)
-    emu.vgpu.ram = emu.ram;
-    virtio_gpu_init(&(emu.vgpu));
-    virtio_gpu_add_scanout(&(emu.vgpu), 1024, 768);
-    window_init();
-#endif
 #if SEMU_HAS(VIRTIOINPUT)
     emu.vkeyboard.ram = emu.ram;
     virtio_input_init(&(emu.vkeyboard));
 
     emu.vmouse.ram = emu.ram;
     virtio_input_init(&(emu.vmouse));
+#endif
+#if SEMU_HAS(VIRTIOGPU)
+    emu.vgpu.ram = emu.ram;
+    virtio_gpu_init(&(emu.vgpu));
+    virtio_gpu_add_scanout(&(emu.vgpu), 1024, 768);
+
+    g_window.window_init();
+#endif
+#if SEMU_HAS(VIRGL)
+    semu_virgl_init(&(emu.vgpu));
 #endif
 
     /* Emulate */
@@ -772,6 +779,10 @@ static int semu_start(int argc, char **argv)
 
                 if (emu.vmouse.InterruptStatus)
                     emu_update_vinput_mouse_interrupts(&vm);
+#endif
+
+#if SEMU_HAS(VIRGL)
+                semu_virgl_fence_poll();
 #endif
             }
 
