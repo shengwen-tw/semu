@@ -4,6 +4,7 @@
 #include <unistd.h>
 
 #include <SDL.h>
+#include <SDL_opengl.h>
 #include <SDL_thread.h>
 
 #include "device.h"
@@ -148,6 +149,10 @@ struct display_info {
     SDL_Thread *ev_thread;
     SDL_Window *window;
     SDL_Renderer *renderer;
+
+#if SEMU_HAS(VIRGL)
+    void *gl_texture;
+#endif
 };
 
 static struct display_info displays[VIRTIO_GPU_MAX_SCANOUTS];
@@ -210,6 +215,7 @@ static int event_thread(void *data)
     }
 }
 
+#if !SEMU_HAS(VIRGL)
 static int window_thread(void *data)
 {
     struct display_info *display = (struct display_info *) data;
@@ -298,6 +304,77 @@ static int window_thread(void *data)
         SDL_UnlockMutex(display->img_mtx);
     }
 }
+#else
+static int window_thread_gl(void *data)
+{
+    struct display_info *display = (struct display_info *) data;
+    struct gpu_resource *resource = &display->resource;
+
+    /* Create SDL window */
+    display->window = SDL_CreateWindow("semu", SDL_WINDOWPOS_UNDEFINED,
+                                       SDL_WINDOWPOS_UNDEFINED, resource->width,
+                                       resource->height,
+                                       SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
+
+    if (!display->window) {
+        fprintf(stderr, "%s(): failed to create window\n", __func__);
+        exit(2);
+    }
+
+    /* Create SDL render */
+    display->renderer =
+        SDL_CreateRenderer(display->window, -1, SDL_RENDERER_ACCELERATED);
+
+    if (!display->renderer) {
+        fprintf(stderr, "%s(): failed to create renderer\n", __func__);
+        exit(2);
+    }
+
+    /* Render the whole screen with black color */
+    SDL_SetRenderDrawColor(display->renderer, 0, 0, 0, 255);
+    SDL_RenderClear(display->renderer);
+    SDL_RenderPresent(display->renderer);
+
+    /* Enable VSync */
+    SDL_GL_SetSwapInterval(1);
+
+    /* Set up OpenGL */
+    // glEnable(GL_TEXTURE_2D);
+    // glBindTexture(GL_TEXTURE_2D, display->gl_texture);
+
+    /* Create event handling thread */
+    ((struct display_info *) data)->ev_thread =
+        SDL_CreateThread(event_thread, NULL, data);
+
+    while (1) {
+        /* Mutex lock */
+        SDL_LockMutex(display->img_mtx);
+
+        printf("TEST1\n\n\n\n\n\n\n");
+
+        /* Wait until the image is arrived */
+        while (SDL_CondWaitTimeout(display->img_cond, display->img_mtx,
+                                   SDL_COND_TIMEOUT))
+            ;
+
+        printf("TEST2\n\n\n\n\n\n\n");
+
+        if (display->render_type == RENDER_PRIMARY_PLANE) {
+            printf("!!!RENDER_PRIMARY_PLANE!!!\n");
+            // glClear(GL_COLOR_BUFFER_BIT);
+            // glEnable(GL_TEXTURE_2D);
+            // glBindTexture(GL_TEXTURE_2D, display->gl_texture);
+            SDL_GL_SwapWindow(display->window);
+            SDL_GL_MakeCurrent(display->window, display->gl_texture);
+        } else if (display->render_type == UPDATE_CURSOR_RESOURCE) {
+        } else if (display->render_type == CLEAR_CURSOR_RESOURCE) {
+        }
+
+        /* Mutex unlock */
+        SDL_UnlockMutex(display->img_mtx);
+    }
+}
+#endif
 
 void window_init(void)
 {
@@ -310,8 +387,13 @@ void window_init(void)
         displays[i].img_mtx = SDL_CreateMutex();
         displays[i].img_cond = SDL_CreateCond();
 
+#if !SEMU_HAS(VIRGL)
         displays[i].win_thread =
             SDL_CreateThread(window_thread, NULL, (void *) &displays[i]);
+#else
+        displays[i].win_thread =
+            SDL_CreateThread(window_thread_gl, NULL, (void *) &displays[i]);
+#endif
         SDL_DetachThread(displays[i].win_thread);
     }
 }
@@ -440,6 +522,19 @@ void window_render(struct gpu_resource *resource)
     memcpy(&display->resource, resource, sizeof(struct gpu_resource));
 
     /* Trigger primary plane rendering */
-    displays[id].render_type = RENDER_PRIMARY_PLANE;
+    display->render_type = RENDER_PRIMARY_PLANE;
     SDL_CondSignal(display->img_cond);
+}
+
+void window_set_gl_texture(int scanout_id, void *gl_texture)
+{
+    displays[scanout_id].gl_texture = gl_texture;
+}
+
+void window_render_gl(int scanout_id)
+{
+    printf("window_render_gl: %d\n\n\n", scanout_id);
+    /* Trigger primary plane rendering */
+    displays[scanout_id].render_type = RENDER_PRIMARY_PLANE;
+    SDL_CondSignal(displays[scanout_id].img_cond);
 }

@@ -34,4 +34,8 @@ void cursor_update(struct gpu_resource *resource, int scanout_id, int x, int y);
 void cursor_move(int scanout_id, int x, int y);
 void window_lock(uint32_t id);
 void window_unlock(uint32_t id);
+
+void window_set_gl_texture(int scanout_id, void *gl_texture);
+void window_render_gl(int scanout_id);
+
 #endif
