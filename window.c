@@ -3,8 +3,11 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include <GL/glew.h>
 #include <SDL.h>
+#include <SDL_opengl.h>
 #include <SDL_thread.h>
+#include <virglrenderer.h>
 
 #include "device.h"
 #include "input-event-codes.h"
@@ -148,6 +151,13 @@ struct display_info {
     SDL_Thread *ev_thread;
     SDL_Window *window;
     SDL_Renderer *renderer;
+
+#if SEMU_HAS(VIRGL)
+    SDL_GLContext win_ctx;
+    GLuint gl_fb;
+    GLuint gl_texture;
+    GLuint cursor_texture_gl;
+#endif
 };
 
 static struct display_info displays[VIRTIO_GPU_MAX_SCANOUTS];
@@ -210,6 +220,7 @@ static int event_thread(void *data)
     }
 }
 
+#if !SEMU_HAS(VIRGL)
 static int window_thread(void *data)
 {
     struct display_info *display = (struct display_info *) data;
@@ -298,7 +309,182 @@ static int window_thread(void *data)
         SDL_UnlockMutex(display->img_mtx);
     }
 }
+#else
+void clear_screen_gl(struct display_info *display)
+{
+    /* Set window for GL to work */
+    SDL_GL_MakeCurrent(display->window, display->win_ctx);
 
+    /* Set rendering region */
+    int width = 0, height = 0;
+    SDL_GetWindowSize(display->window, &width, &height);
+    glViewport(0, 0, width, height);
+
+    /* Set clear color to black and clear the screen */
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    /* Update the window */
+    SDL_GL_SwapWindow(display->window);
+}
+
+void window_setup_scanout(int scanout_id, uint32_t texture_id)
+{
+    /* Trigger primary plane rendering */
+    struct display_info *display = &displays[scanout_id];
+    display->gl_texture = texture_id;
+
+    /* Set window for GL to work */
+    SDL_GL_MakeCurrent(display->window, display->win_ctx);
+
+    /* Allocate GL framebuffer for the guest */
+    if (!display->gl_fb) {
+        glGenFramebuffers(1, &display->gl_fb);
+    }
+
+    glBindFramebuffer(GL_FRAMEBUFFER_EXT, display->gl_fb);
+    glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT,
+                              GL_TEXTURE_2D, display->gl_texture, 0);
+}
+
+void window_render_gl(int scanout_id)
+{
+    /* Trigger primary plane rendering */
+    struct display_info *display = &displays[scanout_id];
+
+    /* Set window for GL to work */
+    SDL_GL_MakeCurrent(display->window, display->win_ctx);
+
+    /* Set rendering region */
+    int width = 0, height = 0;
+    SDL_GetWindowSize(display->window, &width, &height);
+    glViewport(0, 0, width, height);
+
+    printf("###TEXTURE %d\n", display->gl_texture);
+
+    /* Specifying source and destination of framebuffer copy */
+    uint32_t src_fb = display->gl_fb; /* Guest framebuffer */
+    uint32_t dst_fb = 0;              /* 0 to write to the window */
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, src_fb);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, dst_fb);
+
+    /* Source */
+    GLint src_x0 = 0, src_y0 = 0;
+    GLint src_x1 = width, src_y1 = height;
+
+    /* Destination */
+    GLint dst_x0 = 0, dst_y0 = 0;
+    GLint dst_x1 = width, dst_y1 = height;
+
+    /* Copy framebuffer from guest to the window */
+    glBlitFramebuffer(src_x0, src_y0, src_x1, src_y1, dst_x0, dst_y0, dst_x1,
+                      dst_y1, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+
+    /* Update the window */
+    SDL_GL_SwapWindow(display->window);
+}
+
+void cursor_update_gl(int scanout_id, uint32_t *cursor_data)
+{
+    /* Trigger primary plane rendering */
+    struct display_info *display = &displays[scanout_id];
+
+    SDL_GL_MakeCurrent(display->window, display->win_ctx);
+
+    glGenTextures(1, &display->cursor_texture_gl);
+    glBindTexture(GL_TEXTURE_2D, display->cursor_texture_gl);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 64, 64, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, cursor_data);
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+void cursor_move_gl(int scanout_id, int x, int y)
+{
+    /* Trigger primary plane rendering */
+    struct display_info *display = &displays[scanout_id];
+
+    SDL_GL_MakeCurrent(display->window, display->win_ctx);
+
+    int width = 0, height = 0;
+    SDL_GetWindowSize(display->window, &width, &height);
+    glViewport(0, 0, width, height);
+
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, display->gl_fb);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glBlitFramebuffer(0, 0, width, height, 0, 0, width, height,
+                      GL_COLOR_BUFFER_BIT, GL_LINEAR);
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0.0, width, height, 0.0, -1.0, 1.0);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_TEXTURE_2D);
+
+    glBindTexture(GL_TEXTURE_2D, display->cursor_texture_gl);
+    glBegin(GL_QUADS);
+    glTexCoord2f(0, 0);
+    glVertex2f(x, y);
+    glTexCoord2f(1, 0);
+    glVertex2f(x + 64, y);
+    glTexCoord2f(1, 1);
+    glVertex2f(x + 64, y + 64);
+    glTexCoord2f(0, 1);
+    glVertex2f(x, y + 64);
+    glEnd();
+
+    glDisable(GL_TEXTURE_2D);
+    glDisable(GL_BLEND);
+
+    SDL_GL_SwapWindow(display->window);
+}
+#endif
+
+#if SEMU_HAS(VIRGL)
+void window_init(void)
+{
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        fprintf(stderr, "%s(): failed to initialize SDL\n", __func__);
+        exit(2);
+    }
+
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
+                        SDL_GL_CONTEXT_PROFILE_CORE);
+
+    for (int i = 0; i < display_cnt; i++) {
+        struct display_info *display = &displays[i];
+
+        /* Create SDL window */
+        display->window =
+            SDL_CreateWindow("semu", SDL_WINDOWPOS_UNDEFINED,
+                             SDL_WINDOWPOS_UNDEFINED,
+                             /*resource->width,
+    resource->height,*/ 1024, 768, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
+
+        if (!display->window) {
+            fprintf(stderr, "%s(): failed to create window\n", __func__);
+            exit(2);
+        }
+
+        /* Initialize window context */
+        display->win_ctx = SDL_GL_CreateContext(display->window);
+
+        glewInit();
+        clear_screen_gl(display);
+
+        /* Create event handling thread */
+        display->ev_thread = SDL_CreateThread(event_thread, NULL, display);
+    }
+}
+#else
 void window_init(void)
 {
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -315,6 +501,7 @@ void window_init(void)
         SDL_DetachThread(displays[i].win_thread);
     }
 }
+#endif
 
 void window_lock(uint32_t id)
 {
@@ -440,6 +627,46 @@ void window_render(struct gpu_resource *resource)
     memcpy(&display->resource, resource, sizeof(struct gpu_resource));
 
     /* Trigger primary plane rendering */
-    displays[id].render_type = RENDER_PRIMARY_PLANE;
+    display->render_type = RENDER_PRIMARY_PLANE;
     SDL_CondSignal(display->img_cond);
+}
+
+virgl_renderer_gl_context sdl_create_context(
+    int scanout_id,
+    struct virgl_renderer_gl_ctx_param *params)
+{
+    struct display_info *display = &displays[scanout_id];
+
+    /* Set window for GL to work */
+    SDL_GL_MakeCurrent(display->window, display->win_ctx);
+
+    if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, params->major_ver)) {
+        printf("Set major version failed %d\n", params->major_ver);
+        return NULL;
+    }
+
+    if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, params->minor_ver)) {
+        printf("Set minor version failed %d\n", params->minor_ver);
+        return NULL;
+    }
+
+    SDL_GLContext ctx = SDL_GL_CreateContext(display->window);
+    if (!ctx) {
+        printf("Failed to create GL context: %s\n", SDL_GetError());
+    }
+
+    printf("major = %d, minor = %d\n", params->major_ver, params->minor_ver);
+
+    return (void *) ctx;
+}
+
+void sdl_destroy_context(SDL_GLContext ctx)
+{
+    SDL_GL_DeleteContext(ctx);
+}
+
+int sdl_make_context_current(int scanout_id, virgl_renderer_gl_context ctx)
+{
+    struct display_info *display = &displays[scanout_id];
+    return SDL_GL_MakeCurrent(display->window, ctx);
 }
